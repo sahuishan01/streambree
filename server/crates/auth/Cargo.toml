@@ -1,0 +1,11 @@
+[package]
+name = "auth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+serde = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }

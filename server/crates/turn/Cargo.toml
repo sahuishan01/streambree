@@ -1,0 +1,10 @@
+[package]
+name = "turn"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hmac = { workspace = true }
+sha1 = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }

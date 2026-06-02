@@ -1,0 +1,6 @@
+/server/target
+**/*.rs.bk
+*.db
+*.db-shm
+*.db-wal
+.env
