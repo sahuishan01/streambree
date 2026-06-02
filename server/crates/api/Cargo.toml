@@ -13,7 +13,10 @@ auth = { path = "../auth" }
 store = { path = "../store" }
 turn = { path = "../turn" }
 signaling = { path = "../signaling" }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
