@@ -1327,6 +1327,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "signaling"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "turn",
+]
+
+[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
