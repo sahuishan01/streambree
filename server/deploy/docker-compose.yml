@@ -1,0 +1,30 @@
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    network_mode: host          # required so TURN relay ports work correctly
+    volumes:
+      - ./coturn.conf:/etc/coturn/turnserver.conf:ro
+    restart: unless-stopped
+
+  signaling:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      BIND_ADDR: "0.0.0.0:8080"
+      DATABASE_URL: "sqlite:/data/stream_lover.db?mode=rwc"
+      JWT_SECRET: "CHANGE_ME_JWT_SECRET"
+      TURN_SECRET: "CHANGE_ME_SHARED_TURN_SECRET"   # MUST match coturn static-auth-secret
+      TURN_URL: "turns:turn.example.com:5349"
+      STUN_URL: "stun:turn.example.com:3478"
+      TURN_TTL: "600"
+    volumes:
+      - signaling_data:/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      - coturn
+    restart: unless-stopped
+
+volumes:
+  signaling_data:
