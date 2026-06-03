@@ -17,8 +17,8 @@ class FakeSocket implements ISocket {
 function fakePeer(): IPeer {
   return {
     addTrack: vi.fn(),
-    createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'OFFER' })),
-    createAnswer: vi.fn(async () => ({ type: 'answer', sdp: 'ANSWER' })),
+    createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'OFFER' }) as RTCSessionDescriptionInit),
+    createAnswer: vi.fn(async () => ({ type: 'answer', sdp: 'ANSWER' }) as RTCSessionDescriptionInit),
     setLocalDescription: vi.fn(async () => {}),
     setRemoteDescription: vi.fn(async () => {}),
     addIceCandidate: vi.fn(async () => {}),
