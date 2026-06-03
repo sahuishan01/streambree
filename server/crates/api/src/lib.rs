@@ -1,5 +1,6 @@
-//! HTTP API: auth, devices, rooms, TURN credentials.
+//! HTTP API: auth, devices, channels, TURN credentials.
 
+pub mod channels;
 pub mod handlers;
 pub mod policy;
 pub mod ws;
@@ -30,6 +31,10 @@ pub fn router(state: AppState) -> Router {
         .route("/login", post(handlers::login))
         .route("/devices", get(handlers::list_devices).post(handlers::register_device))
         .route("/turn-credentials", post(handlers::turn_credentials))
+        .route("/channels", post(channels::create_channel).get(channels::list_channels))
+        .route("/channels/:id", get(channels::get_channel)
+            .patch(channels::rename_channel)
+            .delete(channels::delete_channel))
         .route("/ws", get(ws::ws_handler))
         .with_state(state)
 }

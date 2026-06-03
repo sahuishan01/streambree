@@ -22,7 +22,7 @@ pub struct NewDevice {
 }
 
 /// Extract and verify the bearer JWT, returning the user id (`sub`).
-fn require_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<String, StatusCode> {
+pub fn require_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<String, StatusCode> {
     let header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
@@ -30,6 +30,22 @@ fn require_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<Str
     let token = header.strip_prefix("Bearer ").ok_or(StatusCode::UNAUTHORIZED)?;
     let claims = auth::verify_token(&state.jwt_secret, token).map_err(|_| StatusCode::UNAUTHORIZED)?;
     Ok(claims.sub)
+}
+
+/// Resolve the caller's role string in a channel, or 403 if not a member.
+pub async fn require_member(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    channel_id: &str,
+) -> Result<(String, String), StatusCode> {
+    let user_id = require_user(state, headers)?;
+    let role = state
+        .store
+        .member_role(channel_id, &user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+    Ok((user_id, role))
 }
 
 pub async fn signup(
