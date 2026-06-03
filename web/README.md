@@ -14,6 +14,15 @@ React + TS + Vite. Framework-agnostic WebRTC core in `src/core/`, thin UI in `sr
 - `src/ui/` — React screens (`Home`, `Sender`, `Receiver`, `Auth`, `MyRooms`) and the
   `useSession` hook that orchestrates signaling + RTC + the connection state machine.
 
+## Known limitations (v1) — tracked follow-ups
+- **Mode is signaled but not yet applied to the local peer.** `modes.ts`
+  (`applySenderParams`/`receiverPlayoutHint`) is implemented and tested but not yet invoked on
+  the `RTCPeerConnection`, so Real-time vs High-quality currently has no effect on the encoding.
+  Wiring needs `IPeer` to expose `getSenders()`.
+- **Transport chip always shows `connected` without `direct|relay`.** The selected ICE
+  candidate-pair detection (via `getStats`) isn't wired yet; `transport` is hardcoded `unknown`.
+  Wiring needs `IPeer` to expose `getStats()`.
+
 ## Manual test checklist (real browsers)
 Run the server first:
 `cd ../server && JWT_SECRET=dev TURN_SECRET=dev cargo run -p stream_lover_server`
