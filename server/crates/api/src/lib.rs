@@ -1,6 +1,7 @@
 //! HTTP API: auth, devices, rooms, TURN credentials.
 
 pub mod handlers;
+pub mod policy;
 pub mod ws;
 
 use axum::routing::{get, post};
