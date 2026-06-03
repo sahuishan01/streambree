@@ -5,7 +5,7 @@ pub mod handlers;
 pub mod policy;
 pub mod ws;
 
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use signaling::Hub;
 use std::sync::Arc;
@@ -35,6 +35,11 @@ pub fn router(state: AppState) -> Router {
         .route("/channels/:id", get(channels::get_channel)
             .patch(channels::rename_channel)
             .delete(channels::delete_channel))
+        .route("/channels/:id/members", get(channels::list_members))
+        .route("/channels/:id/members/:uid",
+            axum::routing::delete(channels::remove_member).patch(channels::change_role))
+        .route("/channels/:id/members/:uid/streaming", patch(channels::set_streaming))
+        .route("/channels/:id/transfer", post(channels::transfer_owner))
         .route("/ws", get(ws::ws_handler))
         .with_state(state)
 }

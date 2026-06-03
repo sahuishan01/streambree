@@ -117,6 +117,104 @@ pub async fn delete_channel(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct RoleChange { pub role: String }
+
+#[derive(Deserialize)]
+pub struct StreamingChange { pub allowed: bool }
+
+#[derive(Deserialize)]
+pub struct TransferBody { pub user_id: String }
+
+pub async fn list_members(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_member(&state, &headers, &id).await?;
+    let members = state.store.members(&id).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut out = Vec::new();
+    for m in members {
+        let email = state.store.email_for_user(&m.user_id).await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.unwrap_or_default();
+        out.push(serde_json::json!({
+            "user_id": m.user_id, "email": email, "role": m.role, "can_stream": m.can_stream != 0
+        }));
+    }
+    Ok(Json(serde_json::Value::Array(out)))
+}
+
+pub async fn remove_member(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path((id, uid)): Path<(String, String)>,
+) -> Result<StatusCode, StatusCode> {
+    let (actor_id, actor_role) = require_member(&state, &headers, &id).await?;
+    let target_role = state.store.member_role(&id, &uid).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    if target_role == "owner" {
+        return Err(StatusCode::CONFLICT);
+    }
+    let is_self = actor_id == uid;
+    if !is_self {
+        let actor = Role::parse(&actor_role).ok_or(StatusCode::FORBIDDEN)?;
+        let target = Role::parse(&target_role);
+        if !allowed(actor, Action::Kick, target) { return Err(StatusCode::FORBIDDEN); }
+    }
+    state.store.remove_member(&id, &uid).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn change_role(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path((id, uid)): Path<(String, String)>,
+    Json(body): Json<RoleChange>,
+) -> Result<StatusCode, StatusCode> {
+    let (_actor, actor_role) = require_member(&state, &headers, &id).await?;
+    let actor = Role::parse(&actor_role).ok_or(StatusCode::FORBIDDEN)?;
+    if !allowed(actor, Action::ChangeRole, None) { return Err(StatusCode::FORBIDDEN); }
+    if body.role != "admin" && body.role != "member" { return Err(StatusCode::BAD_REQUEST); }
+    state.store.set_member_role(&id, &uid, &body.role).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::OK)
+}
+
+pub async fn set_streaming(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path((id, uid)): Path<(String, String)>,
+    Json(body): Json<StreamingChange>,
+) -> Result<StatusCode, StatusCode> {
+    let (_actor, actor_role) = require_member(&state, &headers, &id).await?;
+    let actor = Role::parse(&actor_role).ok_or(StatusCode::FORBIDDEN)?;
+    let target = state.store.member_role(&id, &uid).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.and_then(|r| Role::parse(&r));
+    if !allowed(actor, Action::BlockStream, target) { return Err(StatusCode::FORBIDDEN); }
+    state.store.set_member_streaming(&id, &uid, body.allowed).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // SEAM(Task 8): when blocking a currently-live member, also force-stop their stream.
+    // `state.hub.stop_broadcast` is added in Task 8; leave this commented until then.
+    // if !body.allowed {
+    //     if let Ok(Some(ch)) = state.store.channel_by_id(&id).await {
+    //         state.hub.stop_broadcast(&ch.code, "blocked").await;
+    //     }
+    // }
+    Ok(StatusCode::OK)
+}
+
+pub async fn transfer_owner(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<TransferBody>,
+) -> Result<StatusCode, StatusCode> {
+    let (actor_id, actor_role) = require_member(&state, &headers, &id).await?;
+    let actor = Role::parse(&actor_role).ok_or(StatusCode::FORBIDDEN)?;
+    if !allowed(actor, Action::Transfer, None) { return Err(StatusCode::FORBIDDEN); }
+    state.store.set_member_role(&id, &body.user_id, "owner").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state.store.set_member_role(&id, &actor_id, "admin").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::OK)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::AppState;
@@ -282,5 +380,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ok.status(), StatusCode::OK);
+    }
+
+    async fn make_channel(app: &axum::Router, owner_token: &str, name: &str) -> String {
+        let res = app.clone().oneshot(Request::post("/channels")
+            .header("content-type", "application/json").header("authorization", format!("Bearer {owner_token}"))
+            .body(Body::from(format!(r#"{{"name":"{name}"}}"#))).unwrap()).await.unwrap();
+        let b = res.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice::<serde_json::Value>(&b).unwrap()["id"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn member_cannot_moderate_streaming() {
+        let app = crate::router(state().await);
+        let owner = token(&app, "o@b.com").await;
+        let id = make_channel(&app, &owner, "C").await;
+        let member = token(&app, "m@b.com").await;
+        let denied = app.oneshot(Request::patch(format!("/channels/{id}/members/any/streaming"))
+            .header("content-type", "application/json").header("authorization", format!("Bearer {member}"))
+            .body(Body::from(r#"{"allowed":false}"#)).unwrap()).await.unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn owner_must_transfer_before_leaving() {
+        let app = crate::router(state().await);
+        let owner = token(&app, "o@b.com").await;
+        let id = make_channel(&app, &owner, "C").await;
+        let roster = app.clone().oneshot(Request::get(format!("/channels/{id}/members"))
+            .header("authorization", format!("Bearer {owner}")).body(Body::empty()).unwrap()).await.unwrap();
+        let b = roster.into_body().collect().await.unwrap().to_bytes();
+        let members: serde_json::Value = serde_json::from_slice(&b).unwrap();
+        let uid = members[0]["user_id"].as_str().unwrap().to_string();
+        let res = app.oneshot(Request::delete(format!("/channels/{id}/members/{uid}"))
+            .header("authorization", format!("Bearer {owner}")).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CONFLICT);
     }
 }

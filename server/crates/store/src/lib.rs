@@ -110,6 +110,12 @@ impl Store {
         Ok(devices)
     }
 
+    pub async fn email_for_user(&self, user_id: &str) -> Result<Option<String>, StoreError> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT email FROM users WHERE id = ?")
+            .bind(user_id).fetch_optional(self.pool()).await?;
+        Ok(row.map(|r| r.0))
+    }
+
 }
 
 #[cfg(test)]
