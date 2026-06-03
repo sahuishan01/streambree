@@ -1,4 +1,7 @@
-import type { ClientMsg, Role, ServerMsg } from './protocol';
+import type { ClientMsg, Mode, Role, ServerMsg } from './protocol';
+import type { Transport } from './connection-machine';
+import { applyMode } from './modes';
+import { detectTransport } from './transport';
 
 /** Subset of RTCPeerConnection we use — lets tests inject a fake. */
 export interface IPeer {
@@ -8,9 +11,14 @@ export interface IPeer {
   setLocalDescription(desc: RTCSessionDescriptionInit): Promise<void>;
   setRemoteDescription(desc: RTCSessionDescriptionInit): Promise<void>;
   addIceCandidate(candidate: RTCIceCandidateInit): Promise<void>;
+  getSenders(): RTCRtpSender[];
+  getReceivers(): RTCRtpReceiver[];
+  getStats(): Promise<RTCStatsReport>;
   close(): void;
+  connectionState: RTCPeerConnectionState;
   onicecandidate: ((ev: { candidate: RTCIceCandidateInit | null }) => void) | null;
   ontrack: ((ev: { streams: MediaStream[] }) => void) | null;
+  onconnectionstatechange: (() => void) | null;
 }
 
 export type PeerFactory = (iceServers: RTCIceServer[]) => IPeer;
@@ -21,15 +29,23 @@ const defaultFactory: PeerFactory = (iceServers) =>
 export class RtcSession {
   private peer: IPeer | null = null;
   private remoteStreamHandler: ((s: MediaStream) => void) | null = null;
+  private connectedHandler: ((transport: Transport) => void) | null = null;
+  private connectedFired = false;
 
   constructor(
     private role: Role,
     private factory: PeerFactory = defaultFactory,
     private sendSignal: (msg: ClientMsg) => void = () => {},
+    private mode: Mode = 'realtime',
   ) {}
 
   onRemoteStream(handler: (stream: MediaStream) => void) {
     this.remoteStreamHandler = handler;
+  }
+
+  /** Fires once when the connection is established, with the detected transport. */
+  onConnected(handler: (transport: Transport) => void) {
+    this.connectedHandler = handler;
   }
 
   async start(iceServers: RTCIceServer[], localStream?: MediaStream) {
@@ -41,9 +57,22 @@ export class RtcSession {
     peer.ontrack = (ev) => {
       if (ev.streams[0]) this.remoteStreamHandler?.(ev.streams[0]);
     };
+    peer.onconnectionstatechange = () => {
+      void this.handleConnectionState();
+    };
     if (localStream) {
       for (const track of localStream.getTracks()) peer.addTrack(track, localStream);
     }
+  }
+
+  /** On first 'connected', apply the mode's params and report the transport. */
+  private async handleConnectionState() {
+    if (!this.peer || this.connectedFired) return;
+    if (this.peer.connectionState !== 'connected') return;
+    this.connectedFired = true;
+    await applyMode(this.peer, this.mode);
+    const transport = await detectTransport(this.peer);
+    this.connectedHandler?.(transport);
   }
 
   /** Called when the other peer is ready; the sender initiates the offer. */

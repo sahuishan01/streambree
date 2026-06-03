@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1] - 2026-06-03
+### Added
+- Web client: mode is now applied to the live peer (`applyMode` — sender bitrate/degradation +
+  receiver playout hint) on connect.
+- Web client: real direct/relay transport detection via `getStats` (`detectTransport`); the
+  status chip reflects it. Connection now advances to `connected` on real ICE connectivity,
+  not on receiving an answer.
+
 ## [0.2.0] - 2026-06-03
 ### Added
 - Server: persistent saved rooms (`rooms` table; create/list/delete/resolve endpoints).

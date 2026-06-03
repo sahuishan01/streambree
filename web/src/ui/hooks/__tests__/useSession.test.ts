@@ -22,9 +22,14 @@ function fakePeer(): IPeer {
     setLocalDescription: vi.fn(async () => {}),
     setRemoteDescription: vi.fn(async () => {}),
     addIceCandidate: vi.fn(async () => {}),
+    getSenders: () => [],
+    getReceivers: () => [],
+    getStats: async () => new Map() as unknown as RTCStatsReport,
+    connectionState: 'new',
     close: vi.fn(),
     onicecandidate: null,
     ontrack: null,
+    onconnectionstatechange: null,
   };
 }
 

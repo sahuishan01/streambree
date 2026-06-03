@@ -16,14 +16,30 @@ export function receiverPlayoutHint(mode: Mode): number {
   return mode === 'quality' ? 0.5 : 0;
 }
 
-/** Apply sender params to the first video sender of a peer connection. */
-export async function applySenderParams(pc: RTCPeerConnection, mode: Mode): Promise<void> {
-  const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-  if (!sender) return;
-  const params = sender.getParameters();
-  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-  const { degradationPreference, maxBitrate } = senderParams(mode);
-  params.degradationPreference = degradationPreference;
-  params.encodings[0].maxBitrate = maxBitrate;
-  await sender.setParameters(params);
+/** Minimal peer surface needed to apply mode (kept narrow for testability). */
+export interface ModeTarget {
+  getSenders(): RTCRtpSender[];
+  getReceivers(): RTCRtpReceiver[];
+}
+
+/**
+ * Apply the chosen mode to a live peer: set the video sender's encoding params
+ * (bitrate + degradation preference) and the receivers' playout buffer hint.
+ */
+export async function applyMode(peer: ModeTarget, mode: Mode): Promise<void> {
+  const videoSender = peer.getSenders().find((s) => s.track?.kind === 'video');
+  if (videoSender) {
+    const params = videoSender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+    const { degradationPreference, maxBitrate } = senderParams(mode);
+    params.degradationPreference = degradationPreference;
+    params.encodings[0].maxBitrate = maxBitrate;
+    await videoSender.setParameters(params);
+  }
+
+  const hint = receiverPlayoutHint(mode);
+  for (const receiver of peer.getReceivers()) {
+    // playoutDelayHint is a non-standard but widely-supported tuning knob.
+    (receiver as unknown as { playoutDelayHint?: number }).playoutDelayHint = hint;
+  }
 }

@@ -14,14 +14,13 @@ React + TS + Vite. Framework-agnostic WebRTC core in `src/core/`, thin UI in `sr
 - `src/ui/` — React screens (`Home`, `Sender`, `Receiver`, `Auth`, `MyRooms`) and the
   `useSession` hook that orchestrates signaling + RTC + the connection state machine.
 
-## Known limitations (v1) — tracked follow-ups
-- **Mode is signaled but not yet applied to the local peer.** `modes.ts`
-  (`applySenderParams`/`receiverPlayoutHint`) is implemented and tested but not yet invoked on
-  the `RTCPeerConnection`, so Real-time vs High-quality currently has no effect on the encoding.
-  Wiring needs `IPeer` to expose `getSenders()`.
-- **Transport chip always shows `connected` without `direct|relay`.** The selected ICE
-  candidate-pair detection (via `getStats`) isn't wired yet; `transport` is hardcoded `unknown`.
-  Wiring needs `IPeer` to expose `getStats()`.
+## Mode & transport
+- **Mode is applied to the peer.** On connect, `modes.applyMode` sets the video sender's
+  `maxBitrate` + `degradationPreference` and the receivers' `playoutDelayHint` from the chosen
+  Real-time / High-quality mode (`rtc-session.ts`). The receiver currently uses `realtime`
+  playout (the sender's mode is not yet signaled to the receiver — a small future follow-up).
+- **Transport is detected.** On connect, `transport.detectTransport` reads `getStats()` to find
+  the selected ICE candidate pair and reports `direct` or `relay`; the status chip shows it.
 
 ## Manual test checklist (real browsers)
 Run the server first:

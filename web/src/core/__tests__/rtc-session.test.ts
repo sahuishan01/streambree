@@ -2,7 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { RtcSession, type IPeer } from '../rtc-session';
 import type { ClientMsg } from '../protocol';
 
-function fakePeer(): IPeer & { trigger: (h: string, arg?: unknown) => void } {
+interface FakePeer extends IPeer {
+  trigger: (h: string, arg?: unknown) => void;
+  connectionState: RTCPeerConnectionState;
+  stats: RTCStatsReport;
+}
+
+function fakePeer(): FakePeer {
   const handlers: Record<string, (arg?: unknown) => void> = {};
   return {
     addTrack: vi.fn(),
@@ -11,9 +17,15 @@ function fakePeer(): IPeer & { trigger: (h: string, arg?: unknown) => void } {
     setLocalDescription: vi.fn(async () => {}),
     setRemoteDescription: vi.fn(async () => {}),
     addIceCandidate: vi.fn(async () => {}),
+    getSenders: () => [],
+    getReceivers: () => [],
+    getStats: async function (this: FakePeer) { return this.stats; },
+    stats: new Map() as unknown as RTCStatsReport,
+    connectionState: 'new',
     close: vi.fn(),
     set onicecandidate(h: (arg?: unknown) => void) { handlers.ice = h; },
     set ontrack(h: (arg?: unknown) => void) { handlers.track = h; },
+    set onconnectionstatechange(h: (arg?: unknown) => void) { handlers.conn = h; },
     trigger: (h, arg) => handlers[h]?.(arg),
   };
 }
@@ -57,5 +69,28 @@ describe('RtcSession', () => {
     const stream = {} as MediaStream;
     peer.trigger('track', { streams: [stream] });
     expect(streams).toEqual([stream]);
+  });
+
+  it('reports the detected transport once when the connection completes', async () => {
+    const peer = fakePeer();
+    peer.stats = new Map([
+      ['p1', { id: 'p1', type: 'candidate-pair', state: 'succeeded', remoteCandidateId: 'rc1' }],
+      ['rc1', { id: 'rc1', type: 'remote-candidate', candidateType: 'relay' }],
+    ]) as unknown as RTCStatsReport;
+    const session = new RtcSession('sender', () => peer, () => {});
+    const transports: string[] = [];
+    session.onConnected((t) => transports.push(t));
+    await session.start([]);
+
+    peer.connectionState = 'connected';
+    peer.trigger('conn');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // fires exactly once, even on a repeated state change
+    peer.trigger('conn');
+    await Promise.resolve();
+
+    expect(transports).toEqual(['relay']);
   });
 });
