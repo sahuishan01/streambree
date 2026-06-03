@@ -22,9 +22,10 @@ export class Session {
     private localStream?: MediaStream,
   ) {
     this.signaling = new SignalingClient(url, socketFactory);
-    this.rtc = new RtcSession(role, peerFactory, (m) => this.signaling.send(m));
+    this.rtc = new RtcSession(role, peerFactory, (m) => this.signaling.send(m), mode);
     this.signaling.onMessage((m) => this.onServer(m));
     this.rtc.onRemoteStream((s) => this.remoteHandler?.(s));
+    this.rtc.onConnected((transport) => this.dispatch({ type: 'connected', transport }));
   }
 
   onState(h: (s: MachineState) => void) { this.stateHandler = h; }
@@ -55,8 +56,9 @@ export class Session {
       case 'offer':
       case 'answer':
       case 'ice':
+        // The machine advances to 'connected' from RtcSession.onConnected
+        // (real ICE connectivity), not from receiving an answer.
         await this.rtc.handleSignal(msg);
-        if (msg.type === 'answer') this.dispatch({ type: 'connected', transport: 'unknown' });
         break;
       case 'peer-left':
         this.dispatch({ type: 'peer-left' });
