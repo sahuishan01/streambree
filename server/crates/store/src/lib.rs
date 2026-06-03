@@ -1,7 +1,7 @@
 //! SQLite persistence for users, devices, and channels.
 
 pub mod channels;
-pub use channels::{Channel, Member};
+pub use channels::{Channel, Member, Invite};
 
 use chrono::Utc;
 use serde::Serialize;

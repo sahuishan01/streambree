@@ -25,6 +25,16 @@ pub struct Member {
     pub joined_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Invite {
+    pub id: String,
+    pub channel_id: String,
+    pub code: String,
+    pub created_by: String,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
 impl Store {
     pub async fn create_channel(&self, owner_id: &str, name: &str, code: &str) -> Result<Channel, StoreError> {
         let ch = Channel {
@@ -98,6 +108,33 @@ impl Store {
             .bind(channel_id).bind(user_id).execute(self.pool()).await?;
         Ok(())
     }
+    pub async fn create_invite(&self, channel_id: &str, created_by: &str, code: &str, expires_at: Option<String>) -> Result<Invite, StoreError> {
+        let inv = Invite {
+            id: Uuid::new_v4().to_string(),
+            channel_id: channel_id.to_string(),
+            code: code.to_string(),
+            created_by: created_by.to_string(),
+            expires_at,
+            created_at: Utc::now().to_rfc3339(),
+        };
+        sqlx::query("INSERT INTO channel_invites (id, channel_id, code, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(&inv.id).bind(&inv.channel_id).bind(&inv.code).bind(&inv.created_by).bind(&inv.expires_at).bind(&inv.created_at)
+            .execute(self.pool()).await?;
+        Ok(inv)
+    }
+    pub async fn invite_by_code(&self, code: &str) -> Result<Option<Invite>, StoreError> {
+        Ok(sqlx::query_as::<_, Invite>("SELECT * FROM channel_invites WHERE code = ?")
+            .bind(code).fetch_optional(self.pool()).await?)
+    }
+    pub async fn invites_for_channel(&self, channel_id: &str) -> Result<Vec<Invite>, StoreError> {
+        Ok(sqlx::query_as::<_, Invite>("SELECT * FROM channel_invites WHERE channel_id = ? ORDER BY created_at DESC")
+            .bind(channel_id).fetch_all(self.pool()).await?)
+    }
+    pub async fn delete_invite(&self, channel_id: &str, code: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM channel_invites WHERE channel_id = ? AND code = ?")
+            .bind(channel_id).bind(code).execute(self.pool()).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -147,5 +184,26 @@ mod tests {
         assert!(!store.can_stream(&ch.id, &guest.id).await.unwrap());
         store.remove_member(&ch.id, &guest.id).await.unwrap();
         assert!(store.member_role(&ch.id, &guest.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn create_lookup_and_revoke_invite() {
+        let store = fresh().await;
+        let owner = store.create_user("o@b.com", "h").await.unwrap();
+        let ch = store.create_channel(&owner.id, "Room", "CODE12").await.unwrap();
+        let inv = store.create_invite(&ch.id, &owner.id, "INV777", None).await.unwrap();
+        assert_eq!(inv.code, "INV777");
+        let found = store.invite_by_code("INV777").await.unwrap().unwrap();
+        assert_eq!(found.channel_id, ch.id);
+        store.delete_invite(&ch.id, "INV777").await.unwrap();
+        assert!(store.invite_by_code("INV777").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn user_lookup_by_email_supports_add_by_email() {
+        let store = fresh().await;
+        let target = store.create_user("t@b.com", "h").await.unwrap();
+        let found = store.user_by_email("t@b.com").await.unwrap().unwrap();
+        assert_eq!(found.id, target.id);
     }
 }
