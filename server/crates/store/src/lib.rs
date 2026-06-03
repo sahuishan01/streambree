@@ -1,4 +1,7 @@
-//! SQLite persistence for users and devices.
+//! SQLite persistence for users, devices, and channels.
+
+pub mod channels;
+pub use channels::{Channel, Member};
 
 use chrono::Utc;
 use serde::Serialize;
@@ -29,15 +32,6 @@ pub struct Device {
     pub last_seen: String,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
-pub struct Room {
-    pub id: String,
-    pub owner_id: String,
-    pub name: String,
-    pub code: String,
-    pub created_at: String,
-}
-
 #[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
@@ -58,6 +52,10 @@ impl Store {
             .await
             .map_err(|e| StoreError::Sqlx(sqlx::Error::Migrate(Box::new(e))))?;
         Ok(())
+    }
+
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     pub async fn create_user(&self, email: &str, password_hash: &str) -> Result<User, StoreError> {
@@ -112,49 +110,6 @@ impl Store {
         Ok(devices)
     }
 
-    pub async fn create_room(&self, owner_id: &str, name: &str, code: &str) -> Result<Room, StoreError> {
-        let room = Room {
-            id: Uuid::new_v4().to_string(),
-            owner_id: owner_id.to_string(),
-            name: name.to_string(),
-            code: code.to_string(),
-            created_at: Utc::now().to_rfc3339(),
-        };
-        sqlx::query("INSERT INTO rooms (id, owner_id, name, code, created_at) VALUES (?, ?, ?, ?, ?)")
-            .bind(&room.id)
-            .bind(&room.owner_id)
-            .bind(&room.name)
-            .bind(&room.code)
-            .bind(&room.created_at)
-            .execute(&self.pool)
-            .await?;
-        Ok(room)
-    }
-
-    pub async fn rooms_for_user(&self, owner_id: &str) -> Result<Vec<Room>, StoreError> {
-        let rooms = sqlx::query_as::<_, Room>("SELECT * FROM rooms WHERE owner_id = ? ORDER BY created_at DESC")
-            .bind(owner_id)
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rooms)
-    }
-
-    pub async fn room_by_code(&self, code: &str) -> Result<Option<Room>, StoreError> {
-        let room = sqlx::query_as::<_, Room>("SELECT * FROM rooms WHERE code = ?")
-            .bind(code)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(room)
-    }
-
-    pub async fn delete_room(&self, owner_id: &str, room_id: &str) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM rooms WHERE id = ? AND owner_id = ?")
-            .bind(room_id)
-            .bind(owner_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -198,23 +153,4 @@ mod tests {
         assert!(devices.iter().any(|d| d.name == "Laptop"));
     }
 
-    #[tokio::test]
-    async fn create_list_resolve_and_delete_rooms() {
-        let store = fresh().await;
-        let user = store.create_user("a@b.com", "h").await.unwrap();
-
-        let room = store.create_room(&user.id, "Movie Night", "ABC123").await.unwrap();
-        assert_eq!(room.name, "Movie Night");
-        assert_eq!(room.code, "ABC123");
-
-        let rooms = store.rooms_for_user(&user.id).await.unwrap();
-        assert_eq!(rooms.len(), 1);
-
-        let resolved = store.room_by_code("ABC123").await.unwrap();
-        assert!(resolved.is_some());
-        assert!(store.room_by_code("NOPE99").await.unwrap().is_none());
-
-        store.delete_room(&user.id, &room.id).await.unwrap();
-        assert_eq!(store.rooms_for_user(&user.id).await.unwrap().len(), 0);
-    }
 }
