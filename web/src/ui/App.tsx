@@ -3,7 +3,6 @@ import Home from './screens/Home';
 import Sender from './screens/Sender';
 import Receiver from './screens/Receiver';
 import Auth from './screens/Auth';
-import MyRooms from './screens/MyRooms';
 
 export default function App() {
   return (
@@ -12,7 +11,6 @@ export default function App() {
       <Route path="/send" element={<Sender />} />
       <Route path="/join" element={<Receiver />} />
       <Route path="/auth" element={<Auth />} />
-      <Route path="/rooms" element={<MyRooms />} />
     </Routes>
   );
 }
