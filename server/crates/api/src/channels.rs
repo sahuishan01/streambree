@@ -175,6 +175,10 @@ pub async fn change_role(
     let actor = Role::parse(&actor_role).ok_or(StatusCode::FORBIDDEN)?;
     if !allowed(actor, Action::ChangeRole, None) { return Err(StatusCode::FORBIDDEN); }
     if body.role != "admin" && body.role != "member" { return Err(StatusCode::BAD_REQUEST); }
+    // Target must be an existing member of this channel (and never the owner).
+    let target_role = state.store.member_role(&id, &uid).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    if target_role == "owner" { return Err(StatusCode::CONFLICT); }
     state.store.set_member_role(&id, &uid, &body.role).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::OK)
 }
@@ -210,6 +214,13 @@ pub async fn transfer_owner(
     let (actor_id, actor_role) = require_member(&state, &headers, &id).await?;
     let actor = Role::parse(&actor_role).ok_or(StatusCode::FORBIDDEN)?;
     if !allowed(actor, Action::Transfer, None) { return Err(StatusCode::FORBIDDEN); }
+    // The new owner must already be a member; otherwise the channel could be left
+    // with no owner (old owner demoted, new-owner update matching zero rows).
+    if body.user_id == actor_id { return Err(StatusCode::BAD_REQUEST); }
+    if state.store.member_role(&id, &body.user_id).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
     state.store.set_member_role(&id, &body.user_id, "owner").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     state.store.set_member_role(&id, &actor_id, "admin").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::OK)
@@ -258,6 +269,24 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string()
+    }
+
+    #[tokio::test]
+    async fn transfer_to_non_member_is_rejected() {
+        let app = crate::router(state().await);
+        let owner = token(&app, "o@b.com").await;
+        let id = make_channel(&app, &owner, "C").await;
+        let res = app
+            .oneshot(
+                Request::post(format!("/channels/{id}/transfer"))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {owner}"))
+                    .body(Body::from(r#"{"user_id":"ghost"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
