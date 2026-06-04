@@ -51,10 +51,21 @@ pub fn verify_token(secret: &[u8], token: &str) -> Result<Claims, AuthError> {
 }
 
 /// Short, shareable, unambiguous room code (no 0/O/1/I confusion).
+/// NOTE: low entropy by design (signaling room id); never use for access-control tokens.
 pub fn generate_room_code() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = rand::thread_rng();
     (0..6)
+        .map(|_| ALPHABET[rng.gen_range(0..ALPHABET.len())] as char)
+        .collect()
+}
+
+/// High-entropy, URL-safe token for access-control use (e.g. channel invites).
+/// 40 chars over a 62-symbol alphabet ≈ 238 bits — not brute-forceable/enumerable.
+pub fn generate_secure_token() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    (0..40)
         .map(|_| ALPHABET[rng.gen_range(0..ALPHABET.len())] as char)
         .collect()
 }

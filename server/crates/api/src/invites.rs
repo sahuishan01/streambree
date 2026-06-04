@@ -38,7 +38,13 @@ pub async fn create_invite(
     let (user_id, role) = require_member(&state, &headers, &id).await?;
     require_inviter(&role)?;
     let expires = body.expires_at;
-    let code = auth::generate_room_code();
+    // Validate expiry up front so a malformed value can't later fail open.
+    if let Some(exp) = &expires {
+        chrono::DateTime::parse_from_rfc3339(exp).map_err(|_| StatusCode::BAD_REQUEST)?;
+    }
+    // Invite codes are access-control tokens (they grant membership), so they must
+    // be high-entropy — not the short signaling room code.
+    let code = auth::generate_secure_token();
     let inv = state
         .store
         .create_invite(&id, &user_id, &code, expires)
@@ -111,8 +117,12 @@ pub async fn add_user(
 
 pub async fn preview_invite(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(code): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Require a valid session: only authenticated users can preview an invite,
+    // which (with high-entropy codes) keeps invites from leaking channel names.
+    require_user(&state, &headers)?;
     let inv = state
         .store
         .invite_by_code(&code)
@@ -141,10 +151,10 @@ pub async fn accept_invite(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
     if let Some(exp) = &inv.expires_at {
-        if let Ok(when) = chrono::DateTime::parse_from_rfc3339(exp) {
-            if when < chrono::Utc::now() {
-                return Err(StatusCode::GONE);
-            }
+        // Fail closed: an unparseable expiry is treated as expired, never ignored.
+        let when = chrono::DateTime::parse_from_rfc3339(exp).map_err(|_| StatusCode::GONE)?;
+        if when < chrono::Utc::now() {
+            return Err(StatusCode::GONE);
         }
     }
     if state
@@ -223,6 +233,48 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string()
+    }
+
+    #[tokio::test]
+    async fn invite_code_is_high_entropy() {
+        let app = crate::router(state().await);
+        let owner = token(&app, "o@b.com").await;
+        let id = make_channel(&app, &owner).await;
+        let inv = app
+            .oneshot(
+                Request::post(format!("/channels/{id}/invites"))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {owner}"))
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let b = inv.into_body().collect().await.unwrap().to_bytes();
+        let code = serde_json::from_slice::<serde_json::Value>(&b).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Far longer than the 6-char signaling room code.
+        assert!(code.len() >= 32, "invite code too short: {} chars", code.len());
+    }
+
+    #[tokio::test]
+    async fn create_invite_rejects_malformed_expiry() {
+        let app = crate::router(state().await);
+        let owner = token(&app, "o@b.com").await;
+        let id = make_channel(&app, &owner).await;
+        let res = app
+            .oneshot(
+                Request::post(format!("/channels/{id}/invites"))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {owner}"))
+                    .body(Body::from(r#"{"expires_at":"not-a-date"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
