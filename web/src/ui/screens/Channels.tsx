@@ -25,6 +25,7 @@ export default function Channels() {
   return (
     <main>
       <h2>Channels</h2>
+      <p><Link to="/users">Manage users</Link></p>
       <input aria-label="channel name" value={name} onChange={(e) => setName(e.target.value)} placeholder="New channel name" />
       <button onClick={create}>Create</button>
       <ul>

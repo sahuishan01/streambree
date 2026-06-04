@@ -24,6 +24,8 @@ pub struct AppState {
     pub stun_url: Arc<String>,
     /// TTL (seconds) for issued TURN credentials.
     pub turn_ttl: u64,
+    /// When false the /signup endpoint returns 403.
+    pub signups_allowed: bool,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -31,6 +33,10 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/signup", post(handlers::signup))
         .route("/login", post(handlers::login))
+        .route("/password", post(handlers::change_password))
+        .route("/me", get(handlers::me))
+        .route("/users", get(handlers::list_users).post(handlers::create_user))
+        .route("/users/:id", axum::routing::delete(handlers::delete_user))
         .route("/devices", get(handlers::list_devices).post(handlers::register_device))
         .route("/turn-credentials", post(handlers::turn_credentials))
         .route("/channels", post(channels::create_channel).get(channels::list_channels))

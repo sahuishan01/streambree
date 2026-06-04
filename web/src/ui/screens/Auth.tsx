@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ApiClient } from '../../api/rest';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
@@ -7,14 +8,16 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState('');
+  const navigate = useNavigate();
   const api = new ApiClient(SERVER);
 
   async function run(kind: 'login' | 'signup') {
     try {
       if (kind === 'login') await api.login(email, password);
       else await api.signup(email, password);
-      setMsg('Signed in.');
-    } catch {
+      navigate('/channels');
+    } catch (e) {
+      console.error('auth error:', e);
       setMsg('Authentication failed.');
     }
   }

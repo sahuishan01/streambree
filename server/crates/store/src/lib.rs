@@ -21,6 +21,7 @@ pub struct User {
     pub email: String,
     pub password_hash: String,
     pub created_at: String,
+    pub is_owner: bool,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -58,21 +59,31 @@ impl Store {
         &self.pool
     }
 
-    pub async fn create_user(&self, email: &str, password_hash: &str) -> Result<User, StoreError> {
+    pub async fn create_user(&self, email: &str, password_hash: &str, is_owner: bool) -> Result<User, StoreError> {
         let user = User {
             id: Uuid::new_v4().to_string(),
             email: email.to_string(),
             password_hash: password_hash.to_string(),
             created_at: Utc::now().to_rfc3339(),
+            is_owner,
         };
-        sqlx::query("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (id, email, password_hash, created_at, is_owner) VALUES (?, ?, ?, ?, ?)")
             .bind(&user.id)
             .bind(&user.email)
             .bind(&user.password_hash)
             .bind(&user.created_at)
+            .bind(user.is_owner)
             .execute(&self.pool)
             .await?;
         Ok(user)
+    }
+
+    pub async fn is_owner(&self, user_id: &str) -> Result<bool, StoreError> {
+        let row: Option<(bool,)> = sqlx::query_as("SELECT is_owner FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.0).unwrap_or(false))
     }
 
     pub async fn user_by_email(&self, email: &str) -> Result<Option<User>, StoreError> {
@@ -116,6 +127,38 @@ impl Store {
         Ok(row.map(|r| r.0))
     }
 
+    pub async fn update_password(&self, user_id: &str, new_hash: &str) -> Result<(), StoreError> {
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+            .bind(new_hash)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn user_by_id(&self, user_id: &str) -> Result<Option<User>, StoreError> {
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(user)
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<User>, StoreError> {
+        let users = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(users)
+    }
+
+    pub async fn delete_user(&self, user_id: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
 }
 
 #[cfg(test)]
@@ -131,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn create_and_fetch_user_by_email() {
         let store = fresh().await;
-        let user = store.create_user("a@b.com", "hash123").await.unwrap();
+        let user = store.create_user("a@b.com", "hash123", false).await.unwrap();
         assert_eq!(user.email, "a@b.com");
 
         let found = store.user_by_email("a@b.com").await.unwrap().unwrap();
@@ -142,14 +185,14 @@ mod tests {
     #[tokio::test]
     async fn duplicate_email_is_rejected() {
         let store = fresh().await;
-        store.create_user("a@b.com", "h").await.unwrap();
+        store.create_user("a@b.com", "h", false).await.unwrap();
         assert!(store.create_user("a@b.com", "h2").await.is_err());
     }
 
     #[tokio::test]
     async fn register_and_list_devices_for_user() {
         let store = fresh().await;
-        let user = store.create_user("a@b.com", "h").await.unwrap();
+        let user = store.create_user("a@b.com", "h", false).await.unwrap();
 
         store.create_device(&user.id, "Laptop", "desktop").await.unwrap();
         store.create_device(&user.id, "Pixel", "android").await.unwrap();

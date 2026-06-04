@@ -16,7 +16,7 @@ export interface Member {
 export class ApiClient {
   token: string | null = null;
 
-  constructor(private base: string, private fetchImpl: typeof fetch = fetch) {
+  constructor(private base: string, private fetchImpl: typeof fetch = fetch.bind(globalThis)) {
     this.token = localStorage.getItem('sl_token');
   }
 
@@ -116,6 +116,26 @@ export class ApiClient {
   async stopStream(id: string): Promise<void> {
     await this.fetchImpl(`${this.base}/channels/${id}/stream/stop`, { method: 'POST', headers: this.headers(false) });
   }
+  async me(): Promise<{ id: string; email: string; is_owner: boolean } | null> {
+    if (!this.token) return null;
+    const res = await this.fetchImpl(`${this.base}/me`, { method: 'GET', headers: this.headers(false) });
+    return res.ok ? res.json() : null;
+  }
+
+  async listUsers(): Promise<{ id: string; email: string; created_at: string }[]> {
+    const res = await this.fetchImpl(`${this.base}/users`, { method: 'GET', headers: this.headers(false) });
+    return res.ok ? res.json() : [];
+  }
+  async createUser(email: string, password: string): Promise<boolean> {
+    const res = await this.fetchImpl(`${this.base}/users`, {
+      method: 'POST', headers: this.headers(), body: JSON.stringify({ email, password }),
+    });
+    return res.ok;
+  }
+  async deleteUser(id: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/users/${id}`, { method: 'DELETE', headers: this.headers(false) });
+  }
+
   async turnCredentials(): Promise<RTCIceServer[]> {
     const res = await this.fetchImpl(`${this.base}/turn-credentials`, { method: 'POST', headers: this.headers(false) });
     return res.ok ? res.json() : [];

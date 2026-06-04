@@ -8,6 +8,7 @@ import ChannelDetail from './screens/ChannelDetail';
 import GoLive from './screens/GoLive';
 import Watch from './screens/Watch';
 import InviteAccept from './screens/InviteAccept';
+import Users from './screens/Users';
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/golive/:code" element={<GoLive />} />
       <Route path="/watch/:code" element={<Watch />} />
       <Route path="/invite/:code" element={<InviteAccept />} />
+      <Route path="/users" element={<Users />} />
     </Routes>
   );
 }

@@ -21,8 +21,23 @@ async fn main() -> anyhow::Result<()> {
     let stun_url = env_or("STUN_URL", "stun:localhost:3478");
     let turn_ttl: u64 = env_or("TURN_TTL", "600").parse().unwrap_or(600);
 
+    let signups_allowed = env_or("SIGNUPS_ALLOWED", "false")
+        .to_lowercase()
+        .eq("true");
+    let admin_email = std::env::var("ADMIN_EMAIL").ok();
+    let admin_password = std::env::var("ADMIN_PASSWORD").ok();
+
     let store = Store::connect(&database_url).await?;
     store.migrate().await?;
+
+    if let (Some(email), Some(password)) = (admin_email, admin_password) {
+        if store.user_by_email(&email).await?.is_none() {
+            let hash = auth::hash_password(&password)
+                .context("failed to hash ADMIN_PASSWORD")?;
+            store.create_user(&email, &hash, true).await?;
+            tracing::info!("admin user created: {email}");
+        }
+    }
 
     let state = AppState {
         store,
@@ -32,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
         turn_url: Arc::new(turn_url),
         stun_url: Arc::new(stun_url),
         turn_ttl,
+        signups_allowed,
     };
 
     let app = router(state).layer(tower_http::trace::TraceLayer::new_for_http());

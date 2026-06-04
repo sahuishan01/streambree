@@ -12,6 +12,8 @@ export default function ChannelDetail() {
   const [members, setMembers] = useState<Member[]>([]);
   const [live, setLive] = useState(false);
   const [invite, setInvite] = useState('');
+  const [addEmail, setAddEmail] = useState('');
+  const [addMsg, setAddMsg] = useState('');
 
   async function refresh() {
     setChannel(await api.getChannel(id));
@@ -27,6 +29,23 @@ export default function ChannelDetail() {
   async function makeInvite() { setInvite(await api.createInvite(id)); }
   async function remove() { await api.deleteChannel(id); nav('/channels'); }
 
+  async function addUserToChannel() {
+    setAddMsg('');
+    if (!addEmail) return;
+    const res = await api.addUser(id, addEmail);
+    if (res.ok) {
+      setAddEmail('');
+      setAddMsg(`${addEmail} added.`);
+      await refresh();
+    } else if (res.status === 404) {
+      setAddMsg('No account with that email.');
+    } else if (res.status === 409) {
+      setAddMsg('User is already a member.');
+    } else {
+      setAddMsg('Failed to add user.');
+    }
+  }
+
   if (!channel) return <main><p>Loading…</p></main>;
   return (
     <main>
@@ -38,8 +57,23 @@ export default function ChannelDetail() {
             {canModerate && <button onClick={() => api.stopStream(id).then(refresh)}>Stop stream</button>}</p>
         : <p><Link to={`/golive/${channel.code}`}>Go live</Link></p>}
 
-      {canModerate && <p><button onClick={makeInvite}>Create invite link</button>
-        {invite && <code>{`${location.origin}/invite/${invite}`}</code>}</p>}
+      {canModerate && (
+        <>
+          <p><button onClick={makeInvite}>Create invite link</button>
+            {invite && <code>{`${location.origin}/invite/${invite}`}</code>}</p>
+          <p>
+            Add user by email:{' '}
+            <input
+              aria-label="user email"
+              value={addEmail}
+              onChange={(e) => setAddEmail(e.target.value)}
+              placeholder="email"
+            />
+            <button onClick={addUserToChannel}>Add</button>
+            {addMsg && <small> {addMsg}</small>}
+          </p>
+        </>
+      )}
 
       {isOwner && <p><button onClick={remove}>Delete channel</button></p>}
 

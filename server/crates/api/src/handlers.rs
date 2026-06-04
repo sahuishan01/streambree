@@ -10,6 +10,12 @@ pub struct Credentials {
     pub password: String,
 }
 
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 #[derive(Serialize)]
 pub struct TokenResponse {
     pub token: String,
@@ -52,13 +58,16 @@ pub async fn signup(
     State(state): State<AppState>,
     Json(body): Json<Credentials>,
 ) -> Result<Json<TokenResponse>, StatusCode> {
+    if !state.signups_allowed {
+        return Err(StatusCode::FORBIDDEN);
+    }
     if body.password.len() < 8 {
         return Err(StatusCode::BAD_REQUEST);
     }
     let hash = auth::hash_password(&body.password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let user = state
         .store
-        .create_user(&body.email, &hash)
+        .create_user(&body.email, &hash, false)
         .await
         .map_err(|_| StatusCode::CONFLICT)?;
     let token = auth::issue_token(&state.jwt_secret, &user.id, 86400)
@@ -113,6 +122,96 @@ pub async fn list_devices(
     Ok(Json(devices))
 }
 
+pub async fn me(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user_id = require_user(&state, &headers)?;
+    let user = state
+        .store
+        .user_by_id(&user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(Json(serde_json::json!({ "id": user.id, "email": user.email, "is_owner": user.is_owner })))
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Vec<store::User>>, StatusCode> {
+    let caller = require_user(&state, &headers)?;
+    if !state.store.is_owner(&caller).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let mut users = state.store.list_users().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for u in &mut users { u.password_hash = String::new(); }
+    Ok(Json(users))
+}
+
+pub async fn create_user(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Credentials>,
+) -> Result<StatusCode, StatusCode> {
+    let caller = require_user(&state, &headers)?;
+    if !state.store.is_owner(&caller).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if body.password.len() < 8 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let hash = auth::hash_password(&body.password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state.store.create_user(&body.email, &hash, false).await.map_err(|_| StatusCode::CONFLICT)?;
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn delete_user(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(user_id): axum::extract::Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    let caller = require_user(&state, &headers)?;
+    if !state.store.is_owner(&caller).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if caller == user_id {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    state.store.delete_user(&user_id).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<ChangePasswordRequest>,
+) -> Result<StatusCode, StatusCode> {
+    if body.new_password.len() < 8 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let user_id = require_user(&state, &headers)?;
+    let user = state
+        .store
+        .user_by_id(&user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let ok = auth::verify_password(&body.current_password, &user.password_hash)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !ok {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let new_hash = auth::hash_password(&body.new_password)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state
+        .store
+        .update_password(&user_id, &new_hash)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn turn_credentials(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(ice_servers_json(&state))
 }
@@ -139,6 +238,7 @@ mod tests {
             turn_url: Arc::new("turns:turn.example.com:5349".to_string()),
             stun_url: Arc::new("stun:turn.example.com:3478".to_string()),
             turn_ttl: 600,
+            signups_allowed: true,
         }
     }
 

@@ -17,3 +17,4 @@ tower-http = { workspace = true }
 api = { path = "../crates/api" }
 store = { path = "../crates/store" }
 signaling = { path = "../crates/signaling" }
+auth = { path = "../crates/auth" }
