@@ -100,7 +100,17 @@ impl Hub {
             room: BroadcastRoom::new(), broadcaster_tx: None, viewer_tx: HashMap::new(),
         });
         match lb.room.set_broadcaster(id) {
-            SetBroadcaster::Ok => { lb.broadcaster_tx = Some(tx); true }
+            SetBroadcaster::Ok => {
+                lb.broadcaster_tx = Some(tx);
+                // Announce any viewers who were already waiting before we went live,
+                // so the broadcaster offers to them too.
+                for peer_id in lb.room.viewers() {
+                    if let Some(btx) = &lb.broadcaster_tx {
+                        let _ = btx.send(BroadcastServerMsg::ViewerJoined { peer_id }).await;
+                    }
+                }
+                true
+            }
             SetBroadcaster::AlreadyLive => false,
         }
     }
@@ -253,6 +263,20 @@ mod tests {
         let (btx, _r) = mpsc::channel(8);
         hub.join_broadcaster("chanB", "b1", btx).await;
         assert!(hub.is_broadcasting("chanB").await);
+    }
+
+    #[tokio::test]
+    async fn broadcaster_is_told_about_viewers_who_waited() {
+        use crate::protocol::BroadcastServerMsg;
+        let hub = Hub::new();
+        // viewer arrives before anyone is live
+        let (vtx, _vrx) = mpsc::channel(8);
+        hub.join_viewer("chanC", "v1", vtx).await;
+        // broadcaster goes live and must be told about the waiting viewer
+        let (btx, mut brx) = mpsc::channel(8);
+        assert!(hub.join_broadcaster("chanC", "b1", btx).await);
+        let got = brx.recv().await.unwrap();
+        assert!(matches!(got, BroadcastServerMsg::ViewerJoined { peer_id } if peer_id == "v1"));
     }
 
     #[tokio::test]
