@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0] - 2026-06-04
+### Added
+- Channels: `rooms` renamed to `channels` with membership, owner/admin/member roles, and a
+  `can_stream` block flag. Personal saved rooms backfilled as single-member channels.
+- Invites: revocable invite links (create/accept/preview) and add-by-email.
+- Moderation: kick, role change, transfer ownership, force-stop any stream, block a member from streaming.
+- Authenticated 1-broadcaster->N-viewer broadcast signaling (`/ws/broadcast`) with peer-id-tagged
+  routing; media stays peer-to-peer (sender-side fan-out). `GET /channels/:id/stream` live status.
+### Changed
+- REST: `/rooms*` replaced by `/channels*`.
+
 ## [0.2.1] - 2026-06-03
 ### Added
 - Web client: mode is now applied to the live peer (`applyMode` — sender bitrate/degradation +
