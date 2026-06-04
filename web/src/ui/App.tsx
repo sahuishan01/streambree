@@ -5,6 +5,9 @@ import Receiver from './screens/Receiver';
 import Auth from './screens/Auth';
 import Channels from './screens/Channels';
 import ChannelDetail from './screens/ChannelDetail';
+import GoLive from './screens/GoLive';
+import Watch from './screens/Watch';
+import InviteAccept from './screens/InviteAccept';
 
 export default function App() {
   return (
@@ -15,6 +18,9 @@ export default function App() {
       <Route path="/auth" element={<Auth />} />
       <Route path="/channels" element={<Channels />} />
       <Route path="/channels/:id" element={<ChannelDetail />} />
+      <Route path="/golive/:code" element={<GoLive />} />
+      <Route path="/watch/:code" element={<Watch />} />
+      <Route path="/invite/:code" element={<InviteAccept />} />
     </Routes>
   );
 }

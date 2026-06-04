@@ -40,4 +40,17 @@ describe('app flow', () => {
     expect(await screen.findByText(/Go live/i)).toBeInTheDocument();
     globalThis.fetch = orig;
   });
+
+  it('go-live screen shows source and mode pickers', () => {
+    localStorage.setItem('sl_token', 'JWT');
+    render(<MemoryRouter initialEntries={['/golive/CODE']}><App /></MemoryRouter>);
+    expect(screen.getByLabelText(/Screen/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Real-time/i)).toBeInTheDocument();
+  });
+
+  it('watch screen renders a video element', () => {
+    localStorage.setItem('sl_token', 'JWT');
+    const { container } = render(<MemoryRouter initialEntries={['/watch/CODE']}><App /></MemoryRouter>);
+    expect(container.querySelector('video')).not.toBeNull();
+  });
 });
