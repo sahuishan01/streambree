@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import type { Mode } from '../../core/protocol';
 import { captureScreen, captureCamera, captureFile } from '../../core/sources';
-import { ApiClient } from '../../api/rest';
 import { useSession } from '../hooks/useSession';
 
 type SourceKind = 'screen' | 'camera' | 'file';
@@ -30,14 +29,22 @@ export default function Sender() {
     return captureScreen();
   }
 
+  function makeCode(): string {
+    // CSPRNG, not Math.random: the ad-hoc 2-peer /ws join is unauthenticated, so a
+    // predictable code would let an attacker race to join before the intended viewer.
+    const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const buf = new Uint32Array(10);
+    crypto.getRandomValues(buf);
+    return Array.from(buf, (n) => a[n % a.length]).join('');
+  }
+
   async function createSession() {
     try {
       const captured = await capture();
       setStream(captured);
-      const api = new ApiClient(SERVER);
-      const res = await api.createGuestRoom();
-      setCode(res.code);
-      setRoom(res.code);
+      const c = makeCode();
+      setCode(c);
+      setRoom(c);
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start capture (permission denied?).');

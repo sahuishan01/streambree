@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiClient } from '../../api/rest';
 import { useSession } from '../hooks/useSession';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
@@ -16,12 +15,10 @@ export default function Receiver() {
     if (remote && videoRef.current) videoRef.current.srcObject = remote;
   }, [remote]);
 
-  async function join() {
-    const api = new ApiClient(SERVER);
-    const ok = input.length === 6 ? true : await api.resolveRoom(input);
-    if (!ok) { setError('No such room.'); return; }
+  function join() {
+    if (input.trim().length < 4) { setError('Enter a valid code.'); return; }
     setError('');
-    setRoom(input);
+    setRoom(input.trim());
   }
 
   return (
