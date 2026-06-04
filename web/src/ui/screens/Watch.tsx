@@ -12,6 +12,7 @@ export default function Watch() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
   const [status, setStatus] = useState('connecting');
+  const [needsPlay, setNeedsPlay] = useState(false);
 
   useEffect(() => {
     let viewer: BroadcastViewer | null = null;
@@ -20,7 +21,13 @@ export default function Watch() {
         const api = new ApiClient(SERVER);
         const ice = await api.turnCredentials();
         viewer = new BroadcastViewer(WS, api.token ?? '', code, ice);
-        viewer.onRemoteStream((s) => { if (videoRef.current) { videoRef.current.srcObject = s; setStatus('connected'); } });
+        viewer.onRemoteStream((s) => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = s;
+            videoRef.current.play().catch(() => setNeedsPlay(true));
+            setStatus('connected');
+          }
+        });
         viewer.onTransport(setTransport);
         viewer.onEnded(() => setStatus('stream ended'));
         viewer.start();
@@ -35,7 +42,12 @@ export default function Watch() {
     <main>
       <h2>Watching</h2>
       <p>{status}{transport !== 'unknown' ? ` · ${transport}` : ''}</p>
-      <video ref={videoRef} autoPlay playsInline controls style={{ width: '100%' }} />
+      {needsPlay && (
+        <button onClick={() => { videoRef.current?.play(); setNeedsPlay(false); }}>
+          ▶ Click to play with audio
+        </button>
+      )}
+      <video ref={videoRef} playsInline controls style={{ width: '100%' }} />
     </main>
   );
 }

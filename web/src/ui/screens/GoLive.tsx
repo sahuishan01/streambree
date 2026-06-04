@@ -17,6 +17,7 @@ export default function GoLive() {
   const [viewers, setViewers] = useState(0);
   const [live, setLive] = useState(false);
   const [error, setError] = useState('');
+  const [noAudio, setNoAudio] = useState(false);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const senderRef = useRef<BroadcastSender | null>(null);
   const api = new ApiClient(SERVER);
@@ -33,6 +34,7 @@ export default function GoLive() {
   async function start() {
     try {
       const stream = await capture();
+      setNoAudio(!stream.getAudioTracks().length);
       const ice = await api.turnCredentials();
       const sender = new BroadcastSender(WS, api.token ?? '', code, mode, stream, ice);
       sender.onViewerCount(setViewers);
@@ -55,6 +57,7 @@ export default function GoLive() {
         <label><input type="radio" name="src" checked={source === 'camera'} onChange={() => setSource('camera')} /> Camera</label>
         <label><input type="radio" name="src" checked={source === 'file'} onChange={() => setSource('file')} /> File</label>
       </fieldset>
+      {source === 'screen' && <small>⚠ Check "Share audio" / "Share tab audio" in the browser prompt to include sound.</small>}
       {source === 'file' && <input type="file" accept="video/*,audio/*" aria-label="media file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />}
       <fieldset>
         <legend>Mode</legend>
@@ -63,6 +66,7 @@ export default function GoLive() {
       </fieldset>
       {!live ? <button onClick={start}>Go live</button>
              : <p>● Live · {viewers} watching <button onClick={() => { senderRef.current?.close(); setLive(false); }}>Stop</button></p>}
+      {noAudio && <p role="alert">⚠ No audio track detected — viewers will hear no sound. For screen share, tick "Share audio" in the browser prompt and restart. For files, check the audio codec — browsers do not support AC3/DTS; convert to AAC or Opus.</p>}
       {error && <p role="alert">{error}</p>}
       <video ref={fileVideoRef} muted playsInline style={{ display: source === 'file' ? 'block' : 'none', width: '100%' }} />
     </main>

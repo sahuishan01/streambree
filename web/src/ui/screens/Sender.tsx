@@ -15,6 +15,7 @@ export default function Sender() {
   const [stream, setStream] = useState<MediaStream | undefined>();
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string>('');
+  const [noAudio, setNoAudio] = useState(false);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const { state } = useSession(WS, 'sender', mode, room, stream);
 
@@ -41,6 +42,7 @@ export default function Sender() {
   async function createSession() {
     try {
       const captured = await capture();
+      setNoAudio(!captured.getAudioTracks().length);
       setStream(captured);
       const c = makeCode();
       setCode(c);
@@ -60,6 +62,7 @@ export default function Sender() {
         <label><input type="radio" name="src" checked={source === 'camera'} onChange={() => setSource('camera')} /> Camera</label>
         <label><input type="radio" name="src" checked={source === 'file'} onChange={() => setSource('file')} /> File</label>
       </fieldset>
+      {source === 'screen' && <small>⚠ Check "Share audio" / "Share tab audio" in the browser prompt to include sound.</small>}
       {source === 'file' && (
         <input type="file" accept="video/*,audio/*" aria-label="media file"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -70,6 +73,7 @@ export default function Sender() {
         <label><input type="radio" name="mode" checked={mode === 'quality'} onChange={() => setMode('quality')} /> High quality</label>
       </fieldset>
       <button onClick={createSession}>Create session</button>
+      {noAudio && <p role="alert">⚠ No audio track detected — viewers will hear no sound. For screen share, tick "Share audio" and restart. For files, check the audio codec — browsers do not support AC3/DTS; convert to AAC or Opus.</p>}
       {error && <p role="alert">{error}</p>}
       {code && <p>Room code: <strong>{code}</strong> · {state.conn}{state.transport !== 'unknown' ? ` · ${state.transport}` : ''}</p>}
       <video ref={fileVideoRef} muted playsInline style={{ display: source === 'file' ? 'block' : 'none', width: '100%' }} />
