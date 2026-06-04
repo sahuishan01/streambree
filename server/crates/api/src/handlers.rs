@@ -1,5 +1,5 @@
 use crate::{ice_servers_json, AppState};
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub struct NewDevice {
 }
 
 /// Extract and verify the bearer JWT, returning the user id (`sub`).
-fn require_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<String, StatusCode> {
+pub fn require_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<String, StatusCode> {
     let header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
@@ -30,6 +30,22 @@ fn require_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<Str
     let token = header.strip_prefix("Bearer ").ok_or(StatusCode::UNAUTHORIZED)?;
     let claims = auth::verify_token(&state.jwt_secret, token).map_err(|_| StatusCode::UNAUTHORIZED)?;
     Ok(claims.sub)
+}
+
+/// Resolve the caller's role string in a channel, or 403 if not a member.
+pub async fn require_member(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    channel_id: &str,
+) -> Result<(String, String), StatusCode> {
+    let user_id = require_user(state, headers)?;
+    let role = state
+        .store
+        .member_role(channel_id, &user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+    Ok((user_id, role))
 }
 
 pub async fn signup(
@@ -95,80 +111,6 @@ pub async fn list_devices(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(devices))
-}
-
-#[derive(Deserialize, Default)]
-pub struct NewRoom {
-    pub name: Option<String>,
-}
-
-/// Optional auth: returns Some(user_id) if a valid bearer token is present, else None.
-fn optional_user(state: &AppState, headers: &axum::http::HeaderMap) -> Option<String> {
-    let header = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
-    let token = header.strip_prefix("Bearer ")?;
-    auth::verify_token(&state.jwt_secret, token).ok().map(|c| c.sub)
-}
-
-/// POST /rooms — authed + name => persistent saved room; otherwise ephemeral code.
-pub async fn create_room(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    Json(body): Json<NewRoom>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let code = auth::generate_room_code();
-    match (optional_user(&state, &headers), body.name) {
-        (Some(user_id), Some(name)) if !name.is_empty() => {
-            let room = state
-                .store
-                .create_room(&user_id, &name, &code)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            Ok(Json(serde_json::json!({
-                "id": room.id, "name": room.name, "code": room.code
-            })))
-        }
-        _ => Ok(Json(serde_json::json!({ "code": code }))),
-    }
-}
-
-pub async fn list_rooms(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> Result<Json<Vec<store::Room>>, StatusCode> {
-    let user_id = require_user(&state, &headers)?;
-    let rooms = state
-        .store
-        .rooms_for_user(&user_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(rooms))
-}
-
-pub async fn delete_room(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    Path(room_id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
-    let user_id = require_user(&state, &headers)?;
-    state
-        .store
-        .delete_room(&user_id, &room_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-pub async fn resolve_room(
-    State(state): State<AppState>,
-    Path(code): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let room = state
-        .store
-        .room_by_code(&code)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(serde_json::json!({ "name": room.name, "code": room.code })))
 }
 
 pub async fn turn_credentials(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -255,90 +197,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(login.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    async fn token_for(app: &axum::Router, email: &str) -> String {
-        let res = app
-            .clone()
-            .oneshot(
-                Request::post("/signup")
-                    .header("content-type", "application/json")
-                    .body(Body::from(format!(r#"{{"email":"{email}","password":"pw123456"}}"#)))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let body = res.into_body().collect().await.unwrap().to_bytes();
-        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        v["token"].as_str().unwrap().to_string()
-    }
-
-    #[tokio::test]
-    async fn create_named_room_then_list_and_resolve() {
-        let app = crate::router(test_state().await);
-        let token = token_for(&app, "host@b.com").await;
-
-        let res = app
-            .clone()
-            .oneshot(
-                Request::post("/rooms")
-                    .header("content-type", "application/json")
-                    .header("authorization", format!("Bearer {token}"))
-                    .body(Body::from(r#"{"name":"Movie Night"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = res.into_body().collect().await.unwrap().to_bytes();
-        let room: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let code = room["code"].as_str().unwrap().to_string();
-        assert_eq!(room["name"], "Movie Night");
-
-        let list = app
-            .clone()
-            .oneshot(
-                Request::get("/rooms")
-                    .header("authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let body = list.into_body().collect().await.unwrap().to_bytes();
-        let rooms: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(rooms.as_array().unwrap().len(), 1);
-
-        let resolve = app
-            .clone()
-            .oneshot(Request::get(format!("/rooms/resolve/{code}")).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(resolve.status(), StatusCode::OK);
-
-        let missing = app
-            .oneshot(Request::get("/rooms/resolve/NOPE99").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn guest_create_room_without_auth_returns_ephemeral_code() {
-        let app = crate::router(test_state().await);
-        let res = app
-            .oneshot(
-                Request::post("/rooms")
-                    .header("content-type", "application/json")
-                    .body(Body::from("{}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = res.into_body().collect().await.unwrap().to_bytes();
-        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(v["code"].as_str().unwrap().len(), 6);
     }
 
     #[tokio::test]

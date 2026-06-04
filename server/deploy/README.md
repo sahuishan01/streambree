@@ -17,6 +17,8 @@
 WebRTC requires secure contexts. Put a reverse proxy (Caddy/nginx) in front of the
 signaling service to serve `wss://.../ws` over 443. For TURNS, point coturn's
 `cert`/`pkey` at your certificate (e.g. Let's Encrypt) and uncomment those lines.
+- The new authenticated broadcast endpoint is `wss://<host>/ws/broadcast` (same 8080 service,
+  behind the TLS reverse proxy as `/ws`). No extra ports beyond the existing signaling + coturn.
 
 ## Run
     docker compose up -d --build

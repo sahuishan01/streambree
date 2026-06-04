@@ -6,7 +6,7 @@ CGNAT. Two modes: low-latency real-time and high-quality buffered (a client-side
 config choice — the server is identical for both).
 
 ## Status
-- **Server:** signaling + REST API + ephemeral TURN credentials + saved rooms + coturn deploy. Done.
+- **Server:** signaling + REST API + ephemeral TURN + channels (roles, invites) + 1→N broadcast + coturn deploy. Done.
 - **Web client:** screen/camera/file streaming, real-time & quality modes, room-code & account
   pairing, personal saved rooms. Done.
 - **Native clients (desktop, Android) & shared channels with roles:** later phases.

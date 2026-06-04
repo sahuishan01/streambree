@@ -1,9 +1,13 @@
-//! HTTP API: auth, devices, rooms, TURN credentials.
+//! HTTP API: auth, devices, channels, TURN credentials.
 
+pub mod channels;
 pub mod handlers;
+pub mod invites;
+pub mod policy;
 pub mod ws;
+pub mod ws_broadcast;
 
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use signaling::Hub;
 use std::sync::Arc;
@@ -28,11 +32,25 @@ pub fn router(state: AppState) -> Router {
         .route("/signup", post(handlers::signup))
         .route("/login", post(handlers::login))
         .route("/devices", get(handlers::list_devices).post(handlers::register_device))
-        .route("/rooms", post(handlers::create_room).get(handlers::list_rooms))
-        .route("/rooms/:id", axum::routing::delete(handlers::delete_room))
-        .route("/rooms/resolve/:code", get(handlers::resolve_room))
         .route("/turn-credentials", post(handlers::turn_credentials))
+        .route("/channels", post(channels::create_channel).get(channels::list_channels))
+        .route("/channels/:id", get(channels::get_channel)
+            .patch(channels::rename_channel)
+            .delete(channels::delete_channel))
+        .route("/channels/:id/members", get(channels::list_members))
+        .route("/channels/:id/members/:uid",
+            axum::routing::delete(channels::remove_member).patch(channels::change_role))
+        .route("/channels/:id/members/:uid/streaming", patch(channels::set_streaming))
+        .route("/channels/:id/transfer", post(channels::transfer_owner))
+        .route("/channels/:id/invites", post(invites::create_invite).get(invites::list_invites))
+        .route("/channels/:id/invites/:code", axum::routing::delete(invites::revoke_invite))
+        .route("/channels/:id/add-user", post(invites::add_user))
+        .route("/invites/:code", get(invites::preview_invite))
+        .route("/invites/:code/accept", post(invites::accept_invite))
         .route("/ws", get(ws::ws_handler))
+        .route("/ws/broadcast", get(ws_broadcast::ws_broadcast))
+        .route("/channels/:id/stream", get(channels::stream_status))
+        .route("/channels/:id/stream/stop", post(channels::stop_stream))
         .with_state(state)
 }
 
