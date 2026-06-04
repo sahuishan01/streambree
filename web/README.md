@@ -10,9 +10,19 @@ React + TS + Vite. Framework-agnostic WebRTC core in `src/core/`, thin UI in `sr
 ## Architecture
 - `src/core/` — framework-agnostic, unit-tested: `protocol`, `connection-machine`,
   `signaling-client`, `rtc-session`, `modes`, `sources`. No React imports.
-- `src/api/rest.ts` — auth + saved-room REST calls.
-- `src/ui/` — React screens (`Home`, `Sender`, `Receiver`, `Auth`, `MyRooms`) and the
-  `useSession` hook that orchestrates signaling + RTC + the connection state machine.
+- `src/api/rest.ts` — auth + channel/member/invite/stream REST calls.
+- `src/ui/` — React screens (`Home`, `Sender`, `Receiver`, `Auth`, `Channels`,
+  `ChannelDetail`, `GoLive`, `Watch`, `InviteAccept`) and the `useSession` hook that
+  orchestrates signaling + RTC + the connection state machine.
+
+## Channels & broadcast
+- `core/broadcast-protocol.ts` + `core/broadcast-session.ts` (`BroadcastSender` fan-out,
+  `BroadcastViewer`) implement 1→N broadcast over `/ws/broadcast`.
+- Screens: `Channels` (list), `ChannelDetail` (roster + role-gated moderation + invite +
+  live banner + owner delete/transfer), `GoLive` (broadcaster), `Watch` (viewer),
+  `InviteAccept`.
+- ICE servers for broadcast are fetched via `POST /turn-credentials` (the `broadcast-joined`
+  message does not carry them).
 
 ## Mode & transport
 - **Mode is applied to the peer.** On connect, `modes.applyMode` sets the video sender's
@@ -34,5 +44,13 @@ Run the server first:
 4. Repeat with High-quality mode; confirm video plays (higher bitrate, slight delay).
 5. Force relay: put the two devices on networks that block direct P2P (or firewall the
    relay range off) and confirm status shows `connected · relay`.
-6. Logged in (via Account): create a named room under `/rooms`; rejoin it later via its
-   stable code.
+6. Logged in: open `/channels`, create a channel, make an invite link; a second account
+   opens `/invite/<code>` and joins.
+
+### Channels broadcast (real browsers)
+1. Two logged-in accounts. A creates a channel, makes an invite link, B opens `/invite/<code>`
+   and joins.
+2. A opens the channel → Go live (screen/camera/file). B (and more tabs) open the channel →
+   Watch. Confirm all viewers see A's stream and the viewer count rises (sender-side fan-out).
+3. Owner/admin: kick, block-streaming, promote/demote, transfer ownership, Stop stream, Delete
+   channel. Confirm a blocked member can't go live.

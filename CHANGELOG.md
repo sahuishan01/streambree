@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0] - 2026-06-04
+### Added
+- Web client: Channels surface — `Channels` (list), `ChannelDetail` (roster with role-gated
+  moderation, invite links, live banner, owner delete/transfer), replacing "My rooms".
+- Web client: 1→N broadcast — `BroadcastSender` (sender-side fan-out) + `BroadcastViewer` over
+  `/ws/broadcast`, with `GoLive`/`Watch`/`InviteAccept` screens and direct/relay status.
+### Changed
+- Web REST client targets `/channels*` (the `/rooms*` endpoints were removed server-side); the
+  ad-hoc 2-peer flow now uses a client-generated (CSPRNG) code.
+
 ## [0.3.0] - 2026-06-04
 ### Added
 - Channels: `rooms` renamed to `channels` with membership, owner/admin/member roles, and a
