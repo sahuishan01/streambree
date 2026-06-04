@@ -195,13 +195,12 @@ pub async fn set_streaming(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.and_then(|r| Role::parse(&r));
     if !allowed(actor, Action::BlockStream, target) { return Err(StatusCode::FORBIDDEN); }
     state.store.set_member_streaming(&id, &uid, body.allowed).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    // SEAM(Task 8): when blocking a currently-live member, also force-stop their stream.
-    // `state.hub.stop_broadcast` is added in Task 8; leave this commented until then.
-    // if !body.allowed {
-    //     if let Ok(Some(ch)) = state.store.channel_by_id(&id).await {
-    //         state.hub.stop_broadcast(&ch.code, "blocked").await;
-    //     }
-    // }
+    // When blocking a currently-live member, also force-stop their stream.
+    if !body.allowed {
+        if let Ok(Some(ch)) = state.store.channel_by_id(&id).await {
+            state.hub.stop_broadcast(&ch.code, "blocked").await;
+        }
+    }
     Ok(StatusCode::OK)
 }
 
@@ -224,6 +223,28 @@ pub async fn transfer_owner(
     state.store.set_member_role(&id, &body.user_id, "owner").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     state.store.set_member_role(&id, &actor_id, "admin").await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::OK)
+}
+
+pub async fn stream_status(
+    State(state): State<AppState>, headers: axum::http::HeaderMap, Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_member(&state, &headers, &id).await?;
+    let ch = state.store.channel_by_id(&id).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let live = state.hub.is_broadcasting(&ch.code).await;
+    Ok(Json(serde_json::json!({ "live": live })))
+}
+
+pub async fn stop_stream(
+    State(state): State<AppState>, headers: axum::http::HeaderMap, Path(id): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    let (_u, role) = require_member(&state, &headers, &id).await?;
+    let role = Role::parse(&role).ok_or(StatusCode::FORBIDDEN)?;
+    if !allowed(role, Action::ForceStop, None) { return Err(StatusCode::FORBIDDEN); }
+    let ch = state.store.channel_by_id(&id).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    state.hub.stop_broadcast(&ch.code, "moderator").await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

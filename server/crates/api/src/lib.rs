@@ -5,6 +5,7 @@ pub mod handlers;
 pub mod invites;
 pub mod policy;
 pub mod ws;
+pub mod ws_broadcast;
 
 use axum::routing::{get, patch, post};
 use axum::Router;
@@ -47,6 +48,9 @@ pub fn router(state: AppState) -> Router {
         .route("/invites/:code", get(invites::preview_invite))
         .route("/invites/:code/accept", post(invites::accept_invite))
         .route("/ws", get(ws::ws_handler))
+        .route("/ws/broadcast", get(ws_broadcast::ws_broadcast))
+        .route("/channels/:id/stream", get(channels::stream_status))
+        .route("/channels/:id/stream/stop", post(channels::stop_stream))
         .with_state(state)
 }
 

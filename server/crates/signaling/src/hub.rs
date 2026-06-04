@@ -1,4 +1,5 @@
-use crate::protocol::{Mode, ServerMsg};
+use crate::broadcast::{BroadcastRoom, SetBroadcaster};
+use crate::protocol::{BroadcastServerMsg, Mode, ServerMsg};
 use crate::room::{JoinOutcome, Room};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,15 +11,26 @@ struct LiveRoom {
     senders: HashMap<String, mpsc::Sender<ServerMsg>>,
 }
 
+/// A live broadcast: the pure room state plus channels to broadcaster + viewers.
+struct LiveBroadcast {
+    room: BroadcastRoom,
+    broadcaster_tx: Option<mpsc::Sender<BroadcastServerMsg>>,
+    viewer_tx: HashMap<String, mpsc::Sender<BroadcastServerMsg>>,
+}
+
 /// Owns all live rooms and routes relayed messages between peers.
 #[derive(Clone)]
 pub struct Hub {
     rooms: Arc<Mutex<HashMap<String, LiveRoom>>>,
+    broadcasts: Arc<Mutex<HashMap<String, LiveBroadcast>>>,
 }
 
 impl Hub {
     pub fn new() -> Self {
-        Self { rooms: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            rooms: Arc::new(Mutex::new(HashMap::new())),
+            broadcasts: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// Join `peer_id` to `room_code`, registering its outbound channel.
@@ -81,6 +93,83 @@ impl Hub {
     pub async fn room_count(&self) -> usize {
         self.rooms.lock().await.len()
     }
+
+    pub async fn join_broadcaster(&self, code: &str, id: &str, tx: mpsc::Sender<BroadcastServerMsg>) -> bool {
+        let mut bcs = self.broadcasts.lock().await;
+        let lb = bcs.entry(code.to_string()).or_insert_with(|| LiveBroadcast {
+            room: BroadcastRoom::new(), broadcaster_tx: None, viewer_tx: HashMap::new(),
+        });
+        match lb.room.set_broadcaster(id) {
+            SetBroadcaster::Ok => { lb.broadcaster_tx = Some(tx); true }
+            SetBroadcaster::AlreadyLive => false,
+        }
+    }
+
+    pub async fn join_viewer(&self, code: &str, peer_id: &str, tx: mpsc::Sender<BroadcastServerMsg>) {
+        let mut bcs = self.broadcasts.lock().await;
+        let lb = bcs.entry(code.to_string()).or_insert_with(|| LiveBroadcast {
+            room: BroadcastRoom::new(), broadcaster_tx: None, viewer_tx: HashMap::new(),
+        });
+        lb.room.add_viewer(peer_id);
+        lb.viewer_tx.insert(peer_id.to_string(), tx);
+        if let Some(btx) = &lb.broadcaster_tx {
+            let _ = btx.send(BroadcastServerMsg::ViewerJoined { peer_id: peer_id.to_string() }).await;
+        }
+    }
+
+    pub async fn broadcast_to_viewer(&self, code: &str, peer_id: &str, msg: BroadcastServerMsg) {
+        let bcs = self.broadcasts.lock().await;
+        if let Some(lb) = bcs.get(code) {
+            if let Some(vtx) = lb.viewer_tx.get(peer_id) { let _ = vtx.send(msg).await; }
+        }
+    }
+
+    pub async fn broadcast_to_broadcaster(&self, code: &str, msg: BroadcastServerMsg) {
+        let bcs = self.broadcasts.lock().await;
+        if let Some(lb) = bcs.get(code) {
+            if let Some(btx) = &lb.broadcaster_tx { let _ = btx.send(msg).await; }
+        }
+    }
+
+    pub async fn viewer_left(&self, code: &str, peer_id: &str) {
+        let mut bcs = self.broadcasts.lock().await;
+        if let Some(lb) = bcs.get_mut(code) {
+            lb.room.remove_viewer(peer_id);
+            lb.viewer_tx.remove(peer_id);
+            if let Some(btx) = &lb.broadcaster_tx {
+                let _ = btx.send(BroadcastServerMsg::ViewerLeft { peer_id: peer_id.to_string() }).await;
+            }
+        }
+    }
+
+    pub async fn broadcaster_left(&self, code: &str) {
+        let mut bcs = self.broadcasts.lock().await;
+        if let Some(lb) = bcs.get_mut(code) {
+            for vtx in lb.viewer_tx.values() {
+                let _ = vtx.send(BroadcastServerMsg::BroadcasterLeft).await;
+            }
+            lb.room.clear_broadcaster();
+            lb.broadcaster_tx = None;
+            if lb.room.is_empty() { bcs.remove(code); }
+        }
+    }
+
+    pub async fn stop_broadcast(&self, code: &str, by: &str) {
+        let mut bcs = self.broadcasts.lock().await;
+        if let Some(lb) = bcs.get(code) {
+            if let Some(btx) = &lb.broadcaster_tx {
+                let _ = btx.send(BroadcastServerMsg::ForceStopped { by: by.to_string() }).await;
+            }
+            for vtx in lb.viewer_tx.values() {
+                let _ = vtx.send(BroadcastServerMsg::BroadcasterLeft).await;
+            }
+        }
+        bcs.remove(code);
+    }
+
+    pub async fn is_broadcasting(&self, code: &str) -> bool {
+        self.broadcasts.lock().await.get(code).map(|lb| lb.room.is_live()).unwrap_or(false)
+    }
 }
 
 impl Default for Hub {
@@ -126,6 +215,44 @@ mod tests {
         hub.leave("room2", "b").await;
         let got = rx_a.recv().await.unwrap();
         assert!(matches!(got, ServerMsg::PeerLeft));
+    }
+
+    #[tokio::test]
+    async fn broadcast_routes_viewer_to_broadcaster_and_back() {
+        use crate::protocol::BroadcastServerMsg;
+        let hub = Hub::new();
+        let (btx, mut brx) = mpsc::channel(8);
+        assert!(hub.join_broadcaster("chanA", "b1", btx).await);
+        let (btx2, _r) = mpsc::channel(8);
+        assert!(!hub.join_broadcaster("chanA", "b2", btx2).await);
+
+        let (vtx, mut vrx) = mpsc::channel(8);
+        hub.join_viewer("chanA", "v1", vtx).await;
+        let got = brx.recv().await.unwrap();
+        assert!(matches!(got, BroadcastServerMsg::ViewerJoined { peer_id } if peer_id == "v1"));
+
+        hub.broadcast_to_viewer("chanA", "v1", BroadcastServerMsg::Offer { peer_id: "v1".into(), sdp: "S".into() }).await;
+        let got = vrx.recv().await.unwrap();
+        assert!(matches!(got, BroadcastServerMsg::Offer { sdp, .. } if sdp == "S"));
+
+        hub.broadcast_to_broadcaster("chanA", BroadcastServerMsg::Answer { peer_id: "v1".into(), sdp: "A".into() }).await;
+        let got = brx.recv().await.unwrap();
+        assert!(matches!(got, BroadcastServerMsg::Answer { sdp, .. } if sdp == "A"));
+
+        hub.stop_broadcast("chanA", "owner").await;
+        let b = brx.recv().await.unwrap();
+        assert!(matches!(b, BroadcastServerMsg::ForceStopped { .. }));
+        let v = vrx.recv().await.unwrap();
+        assert!(matches!(v, BroadcastServerMsg::BroadcasterLeft));
+    }
+
+    #[tokio::test]
+    async fn stream_state_reports_live() {
+        let hub = Hub::new();
+        assert!(!hub.is_broadcasting("chanB").await);
+        let (btx, _r) = mpsc::channel(8);
+        hub.join_broadcaster("chanB", "b1", btx).await;
+        assert!(hub.is_broadcasting("chanB").await);
     }
 
     #[tokio::test]
