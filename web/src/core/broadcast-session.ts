@@ -7,6 +7,8 @@ import {
 } from './broadcast-protocol';
 import { detectTransport } from './transport';
 import type { Transport } from './connection-machine';
+import type { Mode } from './protocol';
+import { applyMode } from './modes';
 
 const defaultSocketFactory: SocketFactory = (url) => new WebSocket(url) as unknown as ISocket;
 const defaultPeerFactory: PeerFactory = (iceServers) =>
@@ -89,6 +91,103 @@ export class BroadcastViewer {
   close() {
     this.peer?.close();
     this.peer = null;
+    this.socket?.close();
+    this.socket = null;
+  }
+}
+
+interface ViewerConn {
+  peer: IPeer;
+}
+
+/** The broadcaster: one peer connection per viewer, media stays P2P (sender-side fan-out). */
+export class BroadcastSender {
+  private socket: ISocket | null = null;
+  private viewers = new Map<string, ViewerConn>();
+  private countHandler: ((n: number) => void) | null = null;
+  private stoppedHandler: (() => void) | null = null;
+
+  constructor(
+    private url: string,
+    private jwt: string,
+    private code: string,
+    private mode: Mode,
+    private localStream: MediaStream,
+    private iceServers: RTCIceServer[],
+    private socketFactory: SocketFactory = defaultSocketFactory,
+    private peerFactory: PeerFactory = defaultPeerFactory,
+  ) {}
+
+  onViewerCount(h: (n: number) => void) { this.countHandler = h; }
+  onStopped(h: () => void) { this.stoppedHandler = h; }
+
+  start() {
+    const socket = this.socketFactory(this.url);
+    this.socket = socket;
+    socket.onopen = () => {
+      socket.send(serializeBroadcastMsg({ type: 'join-broadcast', code: this.code, role: 'broadcaster', jwt: this.jwt }));
+    };
+    socket.onmessage = (ev) => {
+      const msg = parseBroadcastServerMsg(ev.data);
+      if (msg) void this.onServer(msg);
+    };
+  }
+
+  private async addViewer(peerId: string) {
+    const peer = this.peerFactory(this.iceServers);
+    peer.onicecandidate = (e) => {
+      if (e.candidate) this.socket?.send(serializeBroadcastMsg({ type: 'ice', peer_id: peerId, candidate: e.candidate }));
+    };
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === 'connected') void applyMode(peer, this.mode);
+    };
+    for (const track of this.localStream.getTracks()) peer.addTrack(track, this.localStream);
+    this.viewers.set(peerId, { peer });
+    this.countHandler?.(this.viewers.size);
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    this.socket?.send(serializeBroadcastMsg({ type: 'offer', peer_id: peerId, sdp: offer.sdp ?? '' }));
+  }
+
+  private removeViewer(peerId: string) {
+    const v = this.viewers.get(peerId);
+    if (v) {
+      v.peer.close();
+      this.viewers.delete(peerId);
+      this.countHandler?.(this.viewers.size);
+    }
+  }
+
+  private async onServer(msg: BroadcastServerMsg) {
+    switch (msg.type) {
+      case 'viewer-joined':
+        await this.addViewer(msg.peer_id);
+        break;
+      case 'viewer-left':
+        this.removeViewer(msg.peer_id);
+        break;
+      case 'answer': {
+        const v = this.viewers.get(msg.peer_id);
+        if (v) await v.peer.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+        break;
+      }
+      case 'ice': {
+        const v = this.viewers.get(msg.peer_id);
+        if (v) await v.peer.addIceCandidate(msg.candidate);
+        break;
+      }
+      case 'force-stopped':
+        this.stoppedHandler?.();
+        this.close();
+        break;
+      default:
+        break;
+    }
+  }
+
+  close() {
+    for (const v of this.viewers.values()) v.peer.close();
+    this.viewers.clear();
     this.socket?.close();
     this.socket = null;
   }
