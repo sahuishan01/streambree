@@ -2,6 +2,7 @@
 
 pub mod channels;
 pub mod handlers;
+pub mod invites;
 pub mod policy;
 pub mod ws;
 
@@ -40,6 +41,11 @@ pub fn router(state: AppState) -> Router {
             axum::routing::delete(channels::remove_member).patch(channels::change_role))
         .route("/channels/:id/members/:uid/streaming", patch(channels::set_streaming))
         .route("/channels/:id/transfer", post(channels::transfer_owner))
+        .route("/channels/:id/invites", post(invites::create_invite).get(invites::list_invites))
+        .route("/channels/:id/invites/:code", axum::routing::delete(invites::revoke_invite))
+        .route("/channels/:id/add-user", post(invites::add_user))
+        .route("/invites/:code", get(invites::preview_invite))
+        .route("/invites/:code/accept", post(invites::accept_invite))
         .route("/ws", get(ws::ws_handler))
         .with_state(state)
 }
