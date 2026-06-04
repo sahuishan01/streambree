@@ -1,7 +1,16 @@
-export interface Room {
+export interface Channel {
   id: string;
   name: string;
   code: string;
+  role?: string;
+  can_stream?: boolean;
+}
+
+export interface Member {
+  user_id: string;
+  email: string;
+  role: string;
+  can_stream: boolean;
 }
 
 export class ApiClient {
@@ -42,31 +51,73 @@ export class ApiClient {
     else throw new Error('login failed');
   }
 
-  async createNamedRoom(name: string): Promise<Room> {
-    const res = await this.fetchImpl(`${this.base}/rooms`, {
+  // --- channels ---
+  async createChannel(name: string): Promise<Channel> {
+    const res = await this.fetchImpl(`${this.base}/channels`, {
       method: 'POST', headers: this.headers(), body: JSON.stringify({ name }),
     });
     return res.json();
   }
-
-  async createGuestRoom(): Promise<{ code: string }> {
-    const res = await this.fetchImpl(`${this.base}/rooms`, {
-      method: 'POST', headers: this.headers(), body: JSON.stringify({}),
-    });
+  async listChannels(): Promise<Channel[]> {
+    const res = await this.fetchImpl(`${this.base}/channels`, { method: 'GET', headers: this.headers(false) });
     return res.json();
   }
-
-  async listRooms(): Promise<Room[]> {
-    const res = await this.fetchImpl(`${this.base}/rooms`, { method: 'GET', headers: this.headers(false) });
+  async getChannel(id: string): Promise<Channel> {
+    const res = await this.fetchImpl(`${this.base}/channels/${id}`, { method: 'GET', headers: this.headers(false) });
     return res.json();
   }
-
-  async deleteRoom(id: string): Promise<void> {
-    await this.fetchImpl(`${this.base}/rooms/${id}`, { method: 'DELETE', headers: this.headers(false) });
+  async renameChannel(id: string, name: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}`, { method: 'PATCH', headers: this.headers(), body: JSON.stringify({ name }) });
+  }
+  async deleteChannel(id: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}`, { method: 'DELETE', headers: this.headers(false) });
   }
 
-  async resolveRoom(code: string): Promise<boolean> {
-    const res = await this.fetchImpl(`${this.base}/rooms/resolve/${code}`, { method: 'GET' });
-    return res.ok;
+  // --- members ---
+  async listMembers(id: string): Promise<Member[]> {
+    const res = await this.fetchImpl(`${this.base}/channels/${id}/members`, { method: 'GET', headers: this.headers(false) });
+    return res.json();
+  }
+  async removeMember(id: string, uid: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}/members/${uid}`, { method: 'DELETE', headers: this.headers(false) });
+  }
+  async changeRole(id: string, uid: string, role: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}/members/${uid}`, { method: 'PATCH', headers: this.headers(), body: JSON.stringify({ role }) });
+  }
+  async setStreaming(id: string, uid: string, allowed: boolean): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}/members/${uid}/streaming`, { method: 'PATCH', headers: this.headers(), body: JSON.stringify({ allowed }) });
+  }
+  async transferOwner(id: string, userId: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}/transfer`, { method: 'POST', headers: this.headers(), body: JSON.stringify({ user_id: userId }) });
+  }
+
+  // --- invites ---
+  async createInvite(id: string): Promise<string> {
+    const res = await this.fetchImpl(`${this.base}/channels/${id}/invites`, { method: 'POST', headers: this.headers(), body: JSON.stringify({}) });
+    return (await res.json()).code;
+  }
+  async addUser(id: string, email: string): Promise<Response> {
+    return this.fetchImpl(`${this.base}/channels/${id}/add-user`, { method: 'POST', headers: this.headers(), body: JSON.stringify({ email }) });
+  }
+  async previewInvite(code: string): Promise<{ channel_id: string; name: string } | null> {
+    const res = await this.fetchImpl(`${this.base}/invites/${code}`, { method: 'GET', headers: this.headers(false) });
+    return res.ok ? res.json() : null;
+  }
+  async acceptInvite(code: string): Promise<{ channel_id: string } | null> {
+    const res = await this.fetchImpl(`${this.base}/invites/${code}/accept`, { method: 'POST', headers: this.headers(false) });
+    return res.ok ? res.json() : null;
+  }
+
+  // --- stream / turn ---
+  async streamStatus(id: string): Promise<boolean> {
+    const res = await this.fetchImpl(`${this.base}/channels/${id}/stream`, { method: 'GET', headers: this.headers(false) });
+    return res.ok ? (await res.json()).live === true : false;
+  }
+  async stopStream(id: string): Promise<void> {
+    await this.fetchImpl(`${this.base}/channels/${id}/stream/stop`, { method: 'POST', headers: this.headers(false) });
+  }
+  async turnCredentials(): Promise<RTCIceServer[]> {
+    const res = await this.fetchImpl(`${this.base}/turn-credentials`, { method: 'POST', headers: this.headers(false) });
+    return res.ok ? res.json() : [];
   }
 }
