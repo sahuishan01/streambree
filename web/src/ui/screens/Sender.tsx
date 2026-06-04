@@ -30,8 +30,12 @@ export default function Sender() {
   }
 
   function makeCode(): string {
+    // CSPRNG, not Math.random: the ad-hoc 2-peer /ws join is unauthenticated, so a
+    // predictable code would let an attacker race to join before the intended viewer.
     const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    return Array.from({ length: 6 }, () => a[Math.floor(Math.random() * a.length)]).join('');
+    const buf = new Uint32Array(10);
+    crypto.getRandomValues(buf);
+    return Array.from(buf, (n) => a[n % a.length]).join('');
   }
 
   async function createSession() {
