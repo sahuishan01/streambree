@@ -4,6 +4,7 @@ import Sender from './screens/Sender';
 import Receiver from './screens/Receiver';
 import Auth from './screens/Auth';
 import Channels from './screens/Channels';
+import ChannelDetail from './screens/ChannelDetail';
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
       <Route path="/join" element={<Receiver />} />
       <Route path="/auth" element={<Auth />} />
       <Route path="/channels" element={<Channels />} />
+      <Route path="/channels/:id" element={<ChannelDetail />} />
     </Routes>
   );
 }

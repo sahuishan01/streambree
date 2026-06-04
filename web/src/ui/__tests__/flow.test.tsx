@@ -23,4 +23,21 @@ describe('app flow', () => {
     expect(screen.getByLabelText(/channel name/i)).toBeInTheDocument();
     expect(screen.getByText(/Create/i)).toBeInTheDocument();
   });
+
+  it('channel detail renders members and the go-live action for a member', async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      const u = String(url);
+      const body = u.endsWith('/members')
+        ? [{ user_id: 'u1', email: 'me@b.com', role: 'owner', can_stream: true }]
+        : u.includes('/stream') ? { live: false }
+        : { id: 'c1', name: 'Movie', code: 'X', role: 'owner', can_stream: true };
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }) as typeof fetch;
+    localStorage.setItem('sl_token', 'JWT');
+    render(<MemoryRouter initialEntries={['/channels/c1']}><App /></MemoryRouter>);
+    expect(await screen.findByText(/Movie/)).toBeInTheDocument();
+    expect(await screen.findByText(/Go live/i)).toBeInTheDocument();
+    globalThis.fetch = orig;
+  });
 });
