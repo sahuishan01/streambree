@@ -17,4 +17,10 @@ describe('app flow', () => {
     fireEvent.click(screen.getByLabelText(/Camera/i));
     expect((screen.getByLabelText(/Camera/i) as HTMLInputElement).checked).toBe(true);
   });
+
+  it('channels screen shows a create form', () => {
+    render(<MemoryRouter initialEntries={['/channels']}><App /></MemoryRouter>);
+    expect(screen.getByLabelText(/channel name/i)).toBeInTheDocument();
+    expect(screen.getByText(/Create/i)).toBeInTheDocument();
+  });
 });
