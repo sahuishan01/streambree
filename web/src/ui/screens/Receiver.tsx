@@ -3,7 +3,7 @@ import { useSession } from '../hooks/useSession';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws';
-const DEFAULT_GAIN = 2.5;
+const DEFAULT_GAIN = 1.5;
 
 export default function Receiver() {
   const [input, setInput] = useState('');
@@ -14,6 +14,7 @@ export default function Receiver() {
   const videoRef  = useRef<HTMLVideoElement>(null);
   const audioCtx  = useRef<AudioContext | null>(null);
   const gainNode  = useRef<GainNode | null>(null);
+  const limiter   = useRef<DynamicsCompressorNode | null>(null);
   const { state, remote } = useSession(WS, 'receiver', 'realtime', room);
 
   useEffect(() => {
@@ -33,11 +34,23 @@ export default function Receiver() {
     if (!el) return;
     const ctx = new AudioContext();
     audioCtx.current = ctx;
+
     const gn = ctx.createGain();
-    gainNode.current = gn;
     gn.gain.value = DEFAULT_GAIN;
+    gainNode.current = gn;
+
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -2;
+    lim.knee.value      =  0;
+    lim.ratio.value     = 20;
+    lim.attack.value    = 0.001;
+    lim.release.value   = 0.15;
+    limiter.current = lim;
+
     ctx.createMediaElementSource(el).connect(gn);
-    gn.connect(ctx.destination);
+    gn.connect(lim);
+    lim.connect(ctx.destination);
+
     el.muted = false;
     el.volume = 1;
     setShowUnmute(false);

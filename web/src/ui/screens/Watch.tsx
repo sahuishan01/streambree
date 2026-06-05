@@ -7,13 +7,14 @@ import { ApiClient } from '../../api/rest';
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
 
-const DEFAULT_GAIN = 2.5;
+const DEFAULT_GAIN = 1.5;
 
 export default function Watch() {
   const { code = '' } = useParams();
   const videoRef  = useRef<HTMLVideoElement>(null);
   const audioCtx  = useRef<AudioContext | null>(null);
   const gainNode  = useRef<GainNode | null>(null);
+  const limiter   = useRef<DynamicsCompressorNode | null>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
   const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
   const [showUnmute, setShowUnmute] = useState(false);
@@ -55,22 +56,32 @@ export default function Watch() {
     const el = videoRef.current;
     if (!el) return;
 
-    // Route audio through a GainNode before speakers for volume boost.
     const ctx = new AudioContext();
     audioCtx.current = ctx;
-    const gain = ctx.createGain();
-    gainNode.current = gain;
-    gain.gain.value = DEFAULT_GAIN;
+
+    // Gain — modest boost to raise WebRTC volume to match local playback.
+    const gn = ctx.createGain();
+    gn.gain.value = DEFAULT_GAIN;
+    gainNode.current = gn;
+
+    // Limiter — catches peaks before they clip, preserving the balance
+    // between transient effects (punches, explosions) and sustained sounds
+    // (music, ambience). High ratio + fast attack = transparent brick wall.
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -2;   // engage above -2 dBFS
+    lim.knee.value      =  0;   // hard knee — limiter not compressor
+    lim.ratio.value     = 20;   // 20:1 ≈ brick-wall limiter
+    lim.attack.value    = 0.001; // 1 ms — catches fast transients
+    lim.release.value   = 0.15; // 150 ms release
+    limiter.current = lim;
 
     const src = ctx.createMediaElementSource(el);
-    src.connect(gain);
-    gain.connect(ctx.destination);
+    src.connect(gn);
+    gn.connect(lim);
+    lim.connect(ctx.destination);
 
-    // createMediaElementSource takes over routing — unmute the element
-    // so its pipeline is active (muted elements may throttle audio).
     el.muted = false;
     el.volume = 1;
-
     setShowUnmute(false);
   }
 
