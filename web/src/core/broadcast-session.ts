@@ -1,5 +1,6 @@
 import type { ISocket, SocketFactory } from './signaling-client';
 import type { IPeer, PeerFactory } from './rtc-session';
+import { enhanceAudioSdp } from './sdp-utils';
 import {
   type BroadcastServerMsg,
   parseBroadcastServerMsg,
@@ -145,8 +146,9 @@ export class BroadcastSender {
     this.viewers.set(peerId, { peer });
     this.countHandler?.(this.viewers.size);
     const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    this.socket?.send(serializeBroadcastMsg({ type: 'offer', peer_id: peerId, sdp: offer.sdp ?? '' }));
+    const enhancedSdp = enhanceAudioSdp(offer.sdp ?? '');
+    await peer.setLocalDescription({ type: 'offer', sdp: enhancedSdp });
+    this.socket?.send(serializeBroadcastMsg({ type: 'offer', peer_id: peerId, sdp: enhancedSdp }));
   }
 
   private removeViewer(peerId: string) {

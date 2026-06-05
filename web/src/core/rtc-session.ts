@@ -1,5 +1,6 @@
 import type { ClientMsg, Mode, Role, ServerMsg } from './protocol';
 import type { Transport } from './connection-machine';
+import { enhanceAudioSdp } from './sdp-utils';
 import { applyMode } from './modes';
 import { detectTransport } from './transport';
 
@@ -79,8 +80,9 @@ export class RtcSession {
   async onPeerReady() {
     if (this.role !== 'sender' || !this.peer) return;
     const offer = await this.peer.createOffer();
-    await this.peer.setLocalDescription(offer);
-    this.sendSignal({ type: 'offer', sdp: offer.sdp ?? '' });
+    const enhancedSdp = enhanceAudioSdp(offer.sdp ?? '');
+    await this.peer.setLocalDescription({ type: 'offer', sdp: enhancedSdp });
+    this.sendSignal({ type: 'offer', sdp: enhancedSdp });
   }
 
   async handleSignal(msg: ServerMsg) {
