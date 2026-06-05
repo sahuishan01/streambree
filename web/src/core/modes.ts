@@ -37,6 +37,14 @@ export async function applyMode(peer: ModeTarget, mode: Mode): Promise<void> {
     await videoSender.setParameters(params);
   }
 
+  const audioSender = peer.getSenders().find((s) => s.track?.kind === 'audio');
+  if (audioSender) {
+    const params = audioSender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+    params.encodings[0].maxBitrate = 320_000;
+    await audioSender.setParameters(params).catch(() => {});
+  }
+
   const hint = receiverPlayoutHint(mode);
   for (const receiver of peer.getReceivers()) {
     // playoutDelayHint is a non-standard but widely-supported tuning knob.

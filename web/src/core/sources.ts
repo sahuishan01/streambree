@@ -27,5 +27,16 @@ export async function captureFile(
     console.warn('[captureFile] No audio — codec may be unsupported (AC3/DTS). Convert: ffmpeg -i input.mkv -c:v copy -c:a aac out.mkv');
   }
 
+  // Disable Chrome's WebRTC audio processing (noise suppression, echo
+  // cancellation, AGC) so the captured audio reaches peers unmodified.
+  const audioTrack = stream.getAudioTracks()[0];
+  if (audioTrack) {
+    await audioTrack.applyConstraints({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    }).catch(() => {});
+  }
+
   return stream;
 }

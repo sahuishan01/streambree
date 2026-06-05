@@ -33,7 +33,7 @@ export function enhanceAudioSdp(sdp: string): string {
     params.set('stereo',            '1');
     params.set('sprop-stereo',      '1');
     params.set('useinbandfec',      '1');
-    params.set('cbr',               '1');      // constant bitrate
+    // VBR (no cbr=1) — lets Opus allocate bits where they matter most
 
     return prefix + Array.from(params.entries()).map(([k, v]) => v ? `${k}=${v}` : k).join(';');
   }).join('\n');
