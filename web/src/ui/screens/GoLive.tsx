@@ -8,10 +8,11 @@ import { ApiClient } from '../../api/rest';
 type SourceKind = 'screen' | 'camera' | 'file';
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
+const canShareScreen = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
 export default function GoLive() {
   const { code = '' } = useParams();
-  const [source, setSource] = useState<SourceKind>('screen');
+  const [source, setSource] = useState<SourceKind>(canShareScreen ? 'screen' : 'file');
   const [mode, setMode] = useState<Mode>('realtime');
   const [file, setFile] = useState<File | null>(null);
   const [viewers, setViewers] = useState(0);
@@ -69,12 +70,14 @@ export default function GoLive() {
           <div className="card">
             <div className="card-title">Source</div>
             <div className="radio-group">
-              {(['screen','camera','file'] as SourceKind[]).map((s) => (
-                <label key={s} className={`radio-opt${source === s ? ' checked' : ''}`}>
-                  <input type="radio" name="src" checked={source === s} onChange={() => setSource(s)} />
-                  {s === 'screen' ? '🖥 Screen' : s === 'camera' ? '📷 Camera' : '📁 File'}
-                </label>
-              ))}
+              {(['screen','camera','file'] as SourceKind[])
+                .filter((s) => s !== 'screen' || canShareScreen)
+                .map((s) => (
+                  <label key={s} className={`radio-opt${source === s ? ' checked' : ''}`}>
+                    <input type="radio" name="src" checked={source === s} onChange={() => setSource(s)} />
+                    {s === 'screen' ? '🖥 Screen' : s === 'camera' ? '📷 Camera' : '📁 File'}
+                  </label>
+                ))}
             </div>
             {source === 'screen' && (
               <div className="alert alert-info" style={{ marginTop: '0.75rem' }}>
