@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
-import { captureScreen, captureCamera, captureFile } from '../../core/sources';
+import { captureScreen, captureCamera, captureFile, isAudioFile } from '../../core/sources';
 import { BroadcastSender } from '../../core/broadcast-session';
 import { ApiClient } from '../../api/rest';
 
@@ -18,28 +18,31 @@ export default function GoLive() {
   const [live, setLive] = useState(false);
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
-  const [dbg, setDbg] = useState('');
   const fileVideoRef = useRef<HTMLVideoElement>(null);
+  const fileAudioRef = useRef<HTMLAudioElement>(null);
   const senderRef = useRef<BroadcastSender | null>(null);
   const api = new ApiClient(SERVER);
+
+  const audioOnly = file ? isAudioFile(file) : false;
 
   async function capture(): Promise<MediaStream> {
     if (source === 'camera') return captureCamera();
     if (source === 'file') {
-      if (!file || !fileVideoRef.current) throw new Error('Choose a file first.');
-      return captureFile(file, fileVideoRef.current as HTMLVideoElement & { captureStream?: () => MediaStream });
+      if (!file) throw new Error('Choose a file first.');
+      if (audioOnly) {
+        if (!fileAudioRef.current) throw new Error('No audio element.');
+        return captureFile(file, fileAudioRef.current);
+      }
+      if (!fileVideoRef.current) throw new Error('No video element.');
+      return captureFile(file, fileVideoRef.current);
     }
     return captureScreen();
   }
 
   async function start() {
-    setDbg(`source=${source} file=${file?.name ?? 'null'} capturing…`);
     try {
       const stream = await capture();
-      const aTracks = stream.getAudioTracks().length;
-      const vTracks = stream.getVideoTracks().length;
-      setDbg(`source=${source} audio=${aTracks} video=${vTracks}`);
-      setNoAudio(aTracks === 0);
+      setNoAudio(stream.getAudioTracks().length === 0);
       const ice = await api.turnCredentials();
       const sender = new BroadcastSender(WS, api.token ?? '', code, mode, stream, ice);
       sender.onViewerCount(setViewers);
@@ -48,9 +51,7 @@ export default function GoLive() {
       senderRef.current = sender;
       setLive(true); setError('');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setDbg(`ERROR: ${msg}`);
-      setError(msg);
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -82,9 +83,14 @@ export default function GoLive() {
             )}
             {source === 'file' && (
               <div style={{ marginTop: '0.75rem' }}>
-                <input className="input" type="file" accept="video/*,audio/*"
+                <input className="input" type="file"
+                  accept="video/*,audio/*,.mkv,.mp4,.webm,.avi,.mov,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.aiff"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-                {file && <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>📁 {file.name}</div>}
+                {file && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>
+                    {audioOnly ? '🎵' : '🎬'} {file.name}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -104,45 +110,54 @@ export default function GoLive() {
           </div>
 
           {error && <div className="alert alert-error">{error}</div>}
-          {dbg && <div className="alert alert-info" style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>{dbg}</div>}
           <button className="btn btn-primary btn-lg" onClick={start}>Go live</button>
         </div>
       ) : (
-        <>
-          <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-            <div className="chip chip-live" style={{ display: 'inline-flex', marginBottom: '1.25rem' }}>
-              <span className="live-dot" />Broadcasting
+        <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
+          <div className="chip chip-live" style={{ display: 'inline-flex', marginBottom: '1.25rem' }}>
+            <span className="live-dot" />Broadcasting
+          </div>
+          <div className="stat-bar" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
+            <div className="stat">
+              <div className="stat-val">{viewers}</div>
+              <div className="stat-lbl">Viewers</div>
             </div>
-            <div className="stat-bar" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
-              <div className="stat">
-                <div className="stat-val">{viewers}</div>
-                <div className="stat-lbl">Viewers</div>
-              </div>
-            </div>
-            {noAudio && <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }}>
+          </div>
+          {noAudio && (
+            <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }}>
               No audio track — viewers hear no sound. For screen share, enable "Share audio" and restart.
               For files, check the codec (AC3/DTS unsupported; convert to AAC).
-            </div>}
-            <button className="btn btn-danger" onClick={stop}>Stop stream</button>
-          </div>
-        </>
+            </div>
+          )}
+          <button className="btn btn-danger" onClick={stop}>Stop stream</button>
+        </div>
       )}
 
       {/*
-        Single persistent element — never unmounted so the ref and audio pipeline
-        stay intact. Style switches between:
-          - setup (not live, file selected): visible preview, no controls
-          - live + file: visible player with controls so sender can seek/pause
-          - anything else: 1px off-screen so Chrome keeps the audio pipeline running
+        Audio-only file: <audio> element with native controls.
+        Kept mounted so captureStream() pipeline stays alive while live.
+        Hidden when not in use.
+      */}
+      <audio
+        ref={fileAudioRef}
+        controls={live && source === 'file' && audioOnly}
+        style={
+          source === 'file' && audioOnly
+            ? { display: 'block', width: '100%', marginTop: '1rem' }
+            : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
+        }
+      />
+
+      {/*
+        Video file: <video> element.
+        1px off-screen when not in use so Chrome keeps the audio pipeline alive.
       */}
       <video
         ref={fileVideoRef}
         playsInline
-        controls={live && source === 'file'}
+        controls={live && source === 'file' && !audioOnly}
         style={
-          source === 'file' && live
-            ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
-            : source === 'file' && !live
+          source === 'file' && !audioOnly
             ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
             : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
         }

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { Mode } from '../../core/protocol';
-import { captureScreen, captureCamera, captureFile } from '../../core/sources';
+import { captureScreen, captureCamera, captureFile, isAudioFile } from '../../core/sources';
 import { useSession } from '../hooks/useSession';
 
 type SourceKind = 'screen' | 'camera' | 'file';
@@ -17,15 +17,21 @@ export default function Sender() {
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
+  const fileAudioRef = useRef<HTMLAudioElement>(null);
   const { state } = useSession(WS, 'sender', mode, room, stream);
+
+  const audioOnly = file ? isAudioFile(file) : false;
 
   async function capture(): Promise<MediaStream> {
     if (source === 'camera') return captureCamera();
     if (source === 'file') {
       if (!file) throw new Error('Choose a file first.');
-      const el = fileVideoRef.current;
-      if (!el) throw new Error('No preview element.');
-      return captureFile(file, el as HTMLVideoElement & { captureStream?: () => MediaStream });
+      if (audioOnly) {
+        if (!fileAudioRef.current) throw new Error('No audio element.');
+        return captureFile(file, fileAudioRef.current);
+      }
+      if (!fileVideoRef.current) throw new Error('No video element.');
+      return captureFile(file, fileVideoRef.current);
     }
     return captureScreen();
   }
@@ -74,9 +80,14 @@ export default function Sender() {
           )}
           {source === 'file' && (
             <div style={{ marginTop: '0.75rem' }}>
-              <input className="input" type="file" accept="video/*,audio/*"
+              <input className="input" type="file"
+                accept="video/*,audio/*,.mkv,.mp4,.webm,.avi,.mov,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.aiff"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              {file && <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>📁 {file.name}</div>}
+              {file && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>
+                  {audioOnly ? '🎵' : '🎬'} {file.name}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -96,7 +107,12 @@ export default function Sender() {
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}
-        {noAudio && <div className="alert alert-warning">No audio track — viewers will hear no sound. For screen share, enable "Share audio". For files, convert AC3/DTS to AAC.</div>}
+        {noAudio && (
+          <div className="alert alert-warning">
+            No audio track — viewers will hear no sound. For screen share, enable "Share audio".
+            For files, convert AC3/DTS to AAC.
+          </div>
+        )}
 
         {!room ? (
           <button className="btn btn-primary btn-lg" onClick={createSession}>Create session</button>
@@ -115,12 +131,24 @@ export default function Sender() {
         )}
       </div>
 
+      {/* Audio-only file player — persistent so captureStream() stays alive */}
+      <audio
+        ref={fileAudioRef}
+        controls={!!room && source === 'file' && audioOnly}
+        style={
+          source === 'file' && audioOnly
+            ? { display: 'block', width: '100%', marginTop: '1rem' }
+            : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
+        }
+      />
+
+      {/* Video file player */}
       <video
         ref={fileVideoRef}
         playsInline
-        controls={!!room && source === 'file'}
+        controls={!!room && source === 'file' && !audioOnly}
         style={
-          source === 'file'
+          source === 'file' && !audioOnly
             ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
             : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
         }
