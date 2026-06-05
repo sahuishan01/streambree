@@ -108,33 +108,45 @@ export default function GoLive() {
           <button className="btn btn-primary btn-lg" onClick={start}>Go live</button>
         </div>
       ) : (
-        <div className="card" style={{ textAlign: 'center', padding: '2.5rem' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📡</div>
-          <div className="chip chip-live" style={{ display: 'inline-flex', marginBottom: '1rem' }}>
-            <span className="live-dot" />Broadcasting
-          </div>
-          <div className="stat-bar" style={{ justifyContent: 'center', margin: '1.5rem 0' }}>
-            <div className="stat">
-              <div className="stat-val">{viewers}</div>
-              <div className="stat-lbl">Viewers</div>
+        <>
+          <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
+            <div className="chip chip-live" style={{ display: 'inline-flex', marginBottom: '1.25rem' }}>
+              <span className="live-dot" />Broadcasting
             </div>
+            <div className="stat-bar" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
+              <div className="stat">
+                <div className="stat-val">{viewers}</div>
+                <div className="stat-lbl">Viewers</div>
+              </div>
+            </div>
+            {noAudio && <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }}>
+              No audio track — viewers hear no sound. For screen share, enable "Share audio" and restart.
+              For files, check the codec (AC3/DTS unsupported; convert to AAC).
+            </div>}
+            <button className="btn btn-danger" onClick={stop}>Stop stream</button>
           </div>
-          {dbg && <div className="alert alert-info" style={{ marginBottom: '1rem', textAlign: 'left', fontFamily: 'monospace', fontSize: '0.8125rem' }}>{dbg}</div>}
-          {noAudio && <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }}>
-            No audio track — viewers hear no sound. For screen share, enable "Share audio" and restart.
-            For files, check the codec (AC3/DTS unsupported; convert to AAC).
-          </div>}
-          <button className="btn btn-danger" onClick={stop}>Stop stream</button>
-        </div>
+        </>
       )}
 
-      {/* No `muted` — Web Audio API handles speaker silence. Keep in layout
-          even when live so Chrome doesn't throttle the audio pipeline. */}
-      <video ref={fileVideoRef} playsInline
-        style={{
-          marginTop: '1rem', borderRadius: 'var(--r-lg)', width: '100%',
-          ...(source !== 'file' || live ? { position: 'fixed', left: '-9999px', width: '1px', height: '1px' } : {}),
-        }} />
+      {/*
+        Single persistent element — never unmounted so the ref and audio pipeline
+        stay intact. Style switches between:
+          - setup (not live, file selected): visible preview, no controls
+          - live + file: visible player with controls so sender can seek/pause
+          - anything else: 1px off-screen so Chrome keeps the audio pipeline running
+      */}
+      <video
+        ref={fileVideoRef}
+        playsInline
+        controls={live && source === 'file'}
+        style={
+          source === 'file' && live
+            ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
+            : source === 'file' && !live
+            ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
+            : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
+        }
+      />
     </div>
   );
 }

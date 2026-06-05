@@ -115,11 +115,16 @@ export default function Sender() {
         )}
       </div>
 
-      <video ref={fileVideoRef} playsInline
-        style={{
-          marginTop: '1rem', borderRadius: 'var(--r-lg)', width: '100%',
-          ...(source !== 'file' || room ? { position: 'fixed', left: '-9999px', width: '1px', height: '1px' } : {}),
-        }} />
+      <video
+        ref={fileVideoRef}
+        playsInline
+        controls={!!room && source === 'file'}
+        style={
+          source === 'file'
+            ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
+            : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
+        }
+      />
     </div>
   );
 }
