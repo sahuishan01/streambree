@@ -12,7 +12,7 @@ export default function Watch() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
   const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
-  const [needsPlay, setNeedsPlay] = useState(false);
+  const [showUnmute, setShowUnmute] = useState(false);
 
   useEffect(() => {
     let viewer: BroadcastViewer | null = null;
@@ -22,11 +22,17 @@ export default function Watch() {
         const ice = await api.turnCredentials();
         viewer = new BroadcastViewer(WS, api.token ?? '', code, ice);
         viewer.onRemoteStream((s) => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = s;
-            videoRef.current.play().catch(() => setNeedsPlay(true));
-            setStatus('connected');
-          }
+          const el = videoRef.current;
+          if (!el) return;
+          el.srcObject = s;
+          el.muted = true; // muted so autoplay never gets blocked
+          // Wait for enough data before calling play() — avoids AbortError
+          el.oncanplay = () => {
+            el.oncanplay = null;
+            el.play().catch(() => {});
+            setShowUnmute(true);
+          };
+          setStatus('connected');
         });
         viewer.onTransport(setTransport);
         viewer.onEnded(() => setStatus('ended'));
@@ -37,6 +43,12 @@ export default function Watch() {
     })();
     return () => viewer?.close();
   }, [code]);
+
+  function unmute() {
+    const el = videoRef.current;
+    if (el) { el.muted = false; el.volume = 1; }
+    setShowUnmute(false);
+  }
 
   const statusLabel = {
     connecting: 'Connecting…',
@@ -54,9 +66,7 @@ export default function Watch() {
             {status === 'connected' && <span className="live-dot" />}
             {statusLabel}
           </span>
-          {transport !== 'unknown' && (
-            <span className="chip">{transport}</span>
-          )}
+          {transport !== 'unknown' && <span className="chip">{transport}</span>}
         </div>
       </div>
 
@@ -71,14 +81,14 @@ export default function Watch() {
             </div>
           </div>
         )}
-        {needsPlay && (
+        {showUnmute && (
           <div className="video-overlay">
-            <button className="btn btn-primary btn-lg"
-              onClick={() => { videoRef.current?.play(); setNeedsPlay(false); }}>
-              ▶ Click to play with audio
+            <button className="btn btn-primary btn-lg" onClick={unmute}>
+              🔊 Click to unmute
             </button>
           </div>
         )}
+        {/* No muted prop — controlled imperatively to avoid React re-render conflicts */}
         <video ref={videoRef} playsInline controls />
       </div>
     </div>

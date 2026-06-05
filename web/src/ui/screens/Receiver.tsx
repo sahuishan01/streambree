@@ -8,16 +8,27 @@ export default function Receiver() {
   const [input, setInput] = useState('');
   const [room, setRoom] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [needsPlay, setNeedsPlay] = useState(false);
+  const [showUnmute, setShowUnmute] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const { state, remote } = useSession(WS, 'receiver', 'realtime', room);
 
   useEffect(() => {
-    if (remote && videoRef.current) {
-      videoRef.current.srcObject = remote;
-      videoRef.current.play().catch(() => setNeedsPlay(true));
-    }
+    const el = videoRef.current;
+    if (!remote || !el) return;
+    el.srcObject = remote;
+    el.muted = true;
+    el.oncanplay = () => {
+      el.oncanplay = null;
+      el.play().catch(() => {});
+      setShowUnmute(true);
+    };
   }, [remote]);
+
+  function unmute() {
+    const el = videoRef.current;
+    if (el) { el.muted = false; el.volume = 1; }
+    setShowUnmute(false);
+  }
 
   function join() {
     if (input.trim().length < 4) { setError('Enter a valid room code.'); return; }
@@ -63,11 +74,10 @@ export default function Receiver() {
                 </div>
               </div>
             )}
-            {needsPlay && (
+            {showUnmute && (
               <div className="video-overlay">
-                <button className="btn btn-primary btn-lg"
-                  onClick={() => { videoRef.current?.play(); setNeedsPlay(false); }}>
-                  ▶ Click to play with audio
+                <button className="btn btn-primary btn-lg" onClick={unmute}>
+                  🔊 Click to unmute
                 </button>
               </div>
             )}
