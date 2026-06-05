@@ -22,6 +22,7 @@ pub struct User {
     pub password_hash: String,
     pub created_at: String,
     pub is_owner: bool,
+    pub username: String,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -66,16 +67,27 @@ impl Store {
             password_hash: password_hash.to_string(),
             created_at: Utc::now().to_rfc3339(),
             is_owner,
+            username: String::new(),
         };
-        sqlx::query("INSERT INTO users (id, email, password_hash, created_at, is_owner) VALUES (?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (id, email, password_hash, created_at, is_owner, username) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&user.id)
             .bind(&user.email)
             .bind(&user.password_hash)
             .bind(&user.created_at)
             .bind(user.is_owner)
+            .bind(&user.username)
             .execute(&self.pool)
             .await?;
         Ok(user)
+    }
+
+    pub async fn update_username(&self, user_id: &str, username: &str) -> Result<(), StoreError> {
+        sqlx::query("UPDATE users SET username = ? WHERE id = ?")
+            .bind(username)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn is_owner(&self, user_id: &str) -> Result<bool, StoreError> {

@@ -11,10 +11,10 @@ export default function Sender() {
   const [source, setSource] = useState<SourceKind>('screen');
   const [mode, setMode] = useState<Mode>('realtime');
   const [room, setRoom] = useState<string | null>(null);
-  const [code, setCode] = useState<string>('');
+  const [code, setCode] = useState('');
   const [stream, setStream] = useState<MediaStream | undefined>();
   const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const { state } = useSession(WS, 'sender', mode, room, stream);
@@ -30,9 +30,7 @@ export default function Sender() {
     return captureScreen();
   }
 
-  function makeCode(): string {
-    // CSPRNG, not Math.random: the ad-hoc 2-peer /ws join is unauthenticated, so a
-    // predictable code would let an attacker race to join before the intended viewer.
+  function makeCode() {
     const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const buf = new Uint32Array(10);
     crypto.getRandomValues(buf);
@@ -45,38 +43,80 @@ export default function Sender() {
       setNoAudio(!captured.getAudioTracks().length);
       setStream(captured);
       const c = makeCode();
-      setCode(c);
-      setRoom(c);
-      setError('');
+      setCode(c); setRoom(c); setError('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start capture (permission denied?).');
+      setError(e instanceof Error ? e.message : 'Could not start capture.');
     }
   }
 
   return (
-    <main>
-      <h2>Start streaming</h2>
-      <fieldset>
-        <legend>Source</legend>
-        <label><input type="radio" name="src" checked={source === 'screen'} onChange={() => setSource('screen')} /> Screen</label>
-        <label><input type="radio" name="src" checked={source === 'camera'} onChange={() => setSource('camera')} /> Camera</label>
-        <label><input type="radio" name="src" checked={source === 'file'} onChange={() => setSource('file')} /> File</label>
-      </fieldset>
-      {source === 'screen' && <small>⚠ Check "Share audio" / "Share tab audio" in the browser prompt to include sound.</small>}
-      {source === 'file' && (
-        <input type="file" accept="video/*,audio/*" aria-label="media file"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-      )}
-      <fieldset>
-        <legend>Mode</legend>
-        <label><input type="radio" name="mode" checked={mode === 'realtime'} onChange={() => setMode('realtime')} /> Real-time</label>
-        <label><input type="radio" name="mode" checked={mode === 'quality'} onChange={() => setMode('quality')} /> High quality</label>
-      </fieldset>
-      <button onClick={createSession}>Create session</button>
-      {noAudio && <p role="alert">⚠ No audio track detected — viewers will hear no sound. For screen share, tick "Share audio" and restart. For files, check the audio codec — browsers do not support AC3/DTS; convert to AAC or Opus.</p>}
-      {error && <p role="alert">{error}</p>}
-      {code && <p>Room code: <strong>{code}</strong> · {state.conn}{state.transport !== 'unknown' ? ` · ${state.transport}` : ''}</p>}
-      <video ref={fileVideoRef} muted playsInline style={{ display: source === 'file' ? 'block' : 'none', width: '100%' }} />
-    </main>
+    <div className="page" style={{ maxWidth: 680 }}>
+      <div className="page-header">
+        <h2>Start streaming</h2>
+        <p className="page-subtitle">One-to-one peer-to-peer stream</p>
+      </div>
+
+      <div className="form">
+        <div className="card">
+          <div className="card-title">Source</div>
+          <div className="radio-group">
+            {(['screen','camera','file'] as SourceKind[]).map((s) => (
+              <label key={s} className={`radio-opt${source === s ? ' checked' : ''}`}>
+                <input type="radio" name="src" checked={source === s} onChange={() => setSource(s)} />
+                {s === 'screen' ? '🖥 Screen' : s === 'camera' ? '📷 Camera' : '📁 File'}
+              </label>
+            ))}
+          </div>
+          {source === 'screen' && (
+            <div className="alert alert-info" style={{ marginTop: '0.75rem' }}>
+              Check "Share audio" or "Share tab audio" in the browser prompt to include sound.
+            </div>
+          )}
+          {source === 'file' && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <input className="input" type="file" accept="video/*,audio/*"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              {file && <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>📁 {file.name}</div>}
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">Quality mode</div>
+          <div className="radio-group">
+            <label className={`radio-opt${mode === 'realtime' ? ' checked' : ''}`}>
+              <input type="radio" name="mode" checked={mode === 'realtime'} onChange={() => setMode('realtime')} />
+              ⚡ Real-time
+            </label>
+            <label className={`radio-opt${mode === 'quality' ? ' checked' : ''}`}>
+              <input type="radio" name="mode" checked={mode === 'quality'} onChange={() => setMode('quality')} />
+              🎬 High quality
+            </label>
+          </div>
+        </div>
+
+        {error && <div className="alert alert-error">{error}</div>}
+        {noAudio && <div className="alert alert-warning">No audio track — viewers will hear no sound. For screen share, enable "Share audio". For files, convert AC3/DTS to AAC.</div>}
+
+        {!room ? (
+          <button className="btn btn-primary btn-lg" onClick={createSession}>Create session</button>
+        ) : (
+          <div className="card">
+            <div className="card-title">Share this code</div>
+            <div className="code-block" style={{ fontSize: '1.25rem', letterSpacing: '0.1em', textAlign: 'center', padding: '1rem' }}>{code}</div>
+            <div className="row" style={{ marginTop: '0.75rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>
+              <span className={`chip${state.conn === 'connected' ? ' chip-live' : ''}`}>
+                {state.conn === 'connected' && <span className="live-dot" />}
+                {state.conn}
+              </span>
+              {state.transport !== 'unknown' && <span className="chip">{state.transport}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <video ref={fileVideoRef} muted playsInline
+        style={{ display: source === 'file' && !room ? 'block' : 'none', marginTop: '1rem', borderRadius: 'var(--r-lg)', width: '100%' }} />
+    </div>
   );
 }

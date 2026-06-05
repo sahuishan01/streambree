@@ -10,30 +10,45 @@ export default function InviteAccept() {
   const api = new ApiClient(SERVER);
   const [name, setName] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [joining, setJoining] = useState(false);
 
   useEffect(() => {
     (async () => {
-      try {
-        const preview = await api.previewInvite(code);
-        if (preview) setName(preview.name);
-        else setError('This invite is no longer valid.');
-      } catch {
-        setError('This invite is no longer valid.');
-      }
+      const preview = await api.previewInvite(code);
+      if (preview) setName(preview.name);
+      else setError('This invite link is no longer valid.');
     })();
   }, [code]);
 
   async function join() {
+    setJoining(true);
     const res = await api.acceptInvite(code);
     if (res) nav(`/channels/${res.channel_id}`);
-    else setError('This invite is no longer valid.');
+    else setError('This invite link is no longer valid.');
   }
 
   return (
-    <main>
-      <h2>Join channel</h2>
-      {error && <p role="alert">{error}</p>}
-      {name && <><p>Join <strong>{name}</strong>?</p><button onClick={join}>Join</button></>}
-    </main>
+    <div className="page-narrow">
+      <div className="auth-header">
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📨</div>
+        <h2>Channel invite</h2>
+      </div>
+      <div className="card" style={{ textAlign: 'center' }}>
+        {error && <div className="alert alert-error">{error}</div>}
+        {name && (
+          <>
+            <p style={{ color: 'var(--text-2)', marginBottom: '0.5rem' }}>You've been invited to join</p>
+            <h3 style={{ marginBottom: '1.5rem', fontSize: '1.375rem' }}>{name}</h3>
+            <button className="btn btn-primary btn-lg" onClick={join} disabled={joining} style={{ width: '100%' }}>
+              {joining ? 'Joining…' : 'Accept invite'}
+            </button>
+          </>
+        )}
+        {!name && !error && <div style={{ color: 'var(--text-2)' }}>Loading…</div>}
+      </div>
+      {!api.token && (
+        <div className="auth-footer">Need an account? <a href="/auth">Sign in</a></div>
+      )}
+    </div>
   );
 }

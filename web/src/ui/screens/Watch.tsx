@@ -11,7 +11,7 @@ export default function Watch() {
   const { code = '' } = useParams();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
-  const [status, setStatus] = useState('connecting');
+  const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
   const [needsPlay, setNeedsPlay] = useState(false);
 
   useEffect(() => {
@@ -29,25 +29,58 @@ export default function Watch() {
           }
         });
         viewer.onTransport(setTransport);
-        viewer.onEnded(() => setStatus('stream ended'));
+        viewer.onEnded(() => setStatus('ended'));
         viewer.start();
       } catch {
-        setStatus('could not connect');
+        setStatus('error');
       }
     })();
     return () => viewer?.close();
   }, [code]);
 
+  const statusLabel = {
+    connecting: 'Connecting…',
+    connected: 'Live',
+    ended: 'Stream ended',
+    error: 'Could not connect',
+  }[status];
+
   return (
-    <main>
-      <h2>Watching</h2>
-      <p>{status}{transport !== 'unknown' ? ` · ${transport}` : ''}</p>
-      {needsPlay && (
-        <button onClick={() => { videoRef.current?.play(); setNeedsPlay(false); }}>
-          ▶ Click to play with audio
-        </button>
-      )}
-      <video ref={videoRef} playsInline controls style={{ width: '100%' }} />
-    </main>
+    <div className="page" style={{ maxWidth: 900 }}>
+      <div className="row-spread page-header">
+        <h2>Watching</h2>
+        <div className="row">
+          <span className={`chip${status === 'connected' ? ' chip-live' : ''}`}>
+            {status === 'connected' && <span className="live-dot" />}
+            {statusLabel}
+          </span>
+          {transport !== 'unknown' && (
+            <span className="chip">{transport}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="video-wrap">
+        {status !== 'connected' && (
+          <div className="video-overlay">
+            <div style={{ textAlign: 'center', color: 'var(--text-2)' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>
+                {status === 'ended' ? '⏹' : status === 'error' ? '⚠️' : '⏳'}
+              </div>
+              <div>{statusLabel}</div>
+            </div>
+          </div>
+        )}
+        {needsPlay && (
+          <div className="video-overlay">
+            <button className="btn btn-primary btn-lg"
+              onClick={() => { videoRef.current?.play(); setNeedsPlay(false); }}>
+              ▶ Click to play with audio
+            </button>
+          </div>
+        )}
+        <video ref={videoRef} playsInline controls />
+      </div>
+    </div>
   );
 }

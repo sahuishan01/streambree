@@ -122,6 +122,11 @@ pub async fn list_devices(
     Ok(Json(devices))
 }
 
+#[derive(Deserialize)]
+pub struct UpdateMe {
+    pub username: Option<String>,
+}
+
 pub async fn me(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -133,7 +138,28 @@ pub async fn me(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    Ok(Json(serde_json::json!({ "id": user.id, "email": user.email, "is_owner": user.is_owner })))
+    Ok(Json(serde_json::json!({
+        "id": user.id,
+        "email": user.email,
+        "username": user.username,
+        "is_owner": user.is_owner,
+    })))
+}
+
+pub async fn update_me(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<UpdateMe>,
+) -> Result<StatusCode, StatusCode> {
+    let user_id = require_user(&state, &headers)?;
+    if let Some(username) = body.username {
+        state
+            .store
+            .update_username(&user_id, &username)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn list_users(

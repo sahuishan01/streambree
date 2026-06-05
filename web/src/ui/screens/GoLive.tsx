@@ -38,37 +38,89 @@ export default function GoLive() {
       const ice = await api.turnCredentials();
       const sender = new BroadcastSender(WS, api.token ?? '', code, mode, stream, ice);
       sender.onViewerCount(setViewers);
-      sender.onStopped(() => { setLive(false); setError('Stream was stopped.'); });
+      sender.onStopped(() => { setLive(false); setError('Stream was stopped remotely.'); });
       sender.start();
       senderRef.current = sender;
-      setLive(true);
-      setError('');
+      setLive(true); setError('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start.');
+      setError(e instanceof Error ? e.message : 'Could not start stream.');
     }
   }
 
+  function stop() { senderRef.current?.close(); setLive(false); setViewers(0); }
+
   return (
-    <main>
-      <h2>Go live</h2>
-      <fieldset>
-        <legend>Source</legend>
-        <label><input type="radio" name="src" checked={source === 'screen'} onChange={() => setSource('screen')} /> Screen</label>
-        <label><input type="radio" name="src" checked={source === 'camera'} onChange={() => setSource('camera')} /> Camera</label>
-        <label><input type="radio" name="src" checked={source === 'file'} onChange={() => setSource('file')} /> File</label>
-      </fieldset>
-      {source === 'screen' && <small>⚠ Check "Share audio" / "Share tab audio" in the browser prompt to include sound.</small>}
-      {source === 'file' && <input type="file" accept="video/*,audio/*" aria-label="media file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />}
-      <fieldset>
-        <legend>Mode</legend>
-        <label><input type="radio" name="mode" checked={mode === 'realtime'} onChange={() => setMode('realtime')} /> Real-time</label>
-        <label><input type="radio" name="mode" checked={mode === 'quality'} onChange={() => setMode('quality')} /> High quality</label>
-      </fieldset>
-      {!live ? <button onClick={start}>Go live</button>
-             : <p>● Live · {viewers} watching <button onClick={() => { senderRef.current?.close(); setLive(false); }}>Stop</button></p>}
-      {noAudio && <p role="alert">⚠ No audio track detected — viewers will hear no sound. For screen share, tick "Share audio" in the browser prompt and restart. For files, check the audio codec — browsers do not support AC3/DTS; convert to AAC or Opus.</p>}
-      {error && <p role="alert">{error}</p>}
-      <video ref={fileVideoRef} muted playsInline style={{ display: source === 'file' ? 'block' : 'none', width: '100%' }} />
-    </main>
+    <div className="page" style={{ maxWidth: 680 }}>
+      <div className="page-header">
+        <h2>Go live</h2>
+        <p className="page-subtitle">Broadcast to your channel viewers</p>
+      </div>
+
+      {!live ? (
+        <div className="form">
+          <div className="card">
+            <div className="card-title">Source</div>
+            <div className="radio-group">
+              {(['screen','camera','file'] as SourceKind[]).map((s) => (
+                <label key={s} className={`radio-opt${source === s ? ' checked' : ''}`}>
+                  <input type="radio" name="src" checked={source === s} onChange={() => setSource(s)} />
+                  {s === 'screen' ? '🖥 Screen' : s === 'camera' ? '📷 Camera' : '📁 File'}
+                </label>
+              ))}
+            </div>
+            {source === 'screen' && (
+              <div className="alert alert-info" style={{ marginTop: '0.75rem' }}>
+                Check "Share audio" or "Share tab audio" in the browser prompt to include sound.
+              </div>
+            )}
+            {source === 'file' && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <input className="input" type="file" accept="video/*,audio/*"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                {file && <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>📁 {file.name}</div>}
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-title">Quality mode</div>
+            <div className="radio-group">
+              <label className={`radio-opt${mode === 'realtime' ? ' checked' : ''}`}>
+                <input type="radio" name="mode" checked={mode === 'realtime'} onChange={() => setMode('realtime')} />
+                ⚡ Real-time
+              </label>
+              <label className={`radio-opt${mode === 'quality' ? ' checked' : ''}`}>
+                <input type="radio" name="mode" checked={mode === 'quality'} onChange={() => setMode('quality')} />
+                🎬 High quality
+              </label>
+            </div>
+          </div>
+
+          {error && <div className="alert alert-error">{error}</div>}
+          <button className="btn btn-primary btn-lg" onClick={start}>Go live</button>
+        </div>
+      ) : (
+        <div className="card" style={{ textAlign: 'center', padding: '2.5rem' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📡</div>
+          <div className="chip chip-live" style={{ display: 'inline-flex', marginBottom: '1rem' }}>
+            <span className="live-dot" />Broadcasting
+          </div>
+          <div className="stat-bar" style={{ justifyContent: 'center', margin: '1.5rem 0' }}>
+            <div className="stat">
+              <div className="stat-val">{viewers}</div>
+              <div className="stat-lbl">Viewers</div>
+            </div>
+          </div>
+          {noAudio && <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }}>
+            No audio track — viewers hear no sound. For screen share, enable "Share audio" and restart.
+            For files, check the codec (AC3/DTS unsupported; convert to AAC).
+          </div>}
+          <button className="btn btn-danger" onClick={stop}>Stop stream</button>
+        </div>
+      )}
+
+      <video ref={fileVideoRef} muted playsInline
+        style={{ display: source === 'file' && !live ? 'block' : 'none', marginTop: '1rem', borderRadius: 'var(--r-lg)', width: '100%' }} />
+    </div>
   );
 }

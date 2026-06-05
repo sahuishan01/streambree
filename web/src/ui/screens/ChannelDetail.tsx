@@ -16,9 +16,10 @@ export default function ChannelDetail() {
   const [addMsg, setAddMsg] = useState('');
 
   async function refresh() {
-    setChannel(await api.getChannel(id));
-    setMembers(await api.listMembers(id));
-    setLive(await api.streamStatus(id));
+    const [ch, mb, lv] = await Promise.all([
+      api.getChannel(id), api.listMembers(id), api.streamStatus(id),
+    ]);
+    setChannel(ch); setMembers(mb); setLive(lv);
   }
   useEffect(() => { void refresh(); }, [id]);
 
@@ -27,80 +28,114 @@ export default function ChannelDetail() {
   const isOwner = myRole === 'owner';
 
   async function makeInvite() { setInvite(await api.createInvite(id)); }
-  async function remove() { await api.deleteChannel(id); nav('/channels'); }
+  async function remove() { if (!confirm(`Delete "${channel?.name}"?`)) return; await api.deleteChannel(id); nav('/channels'); }
 
-  async function addUserToChannel() {
+  async function addUser() {
     setAddMsg('');
     if (!addEmail) return;
     const res = await api.addUser(id, addEmail);
-    if (res.ok) {
-      setAddEmail('');
-      setAddMsg(`${addEmail} added.`);
-      await refresh();
-    } else if (res.status === 404) {
-      setAddMsg('No account with that email.');
-    } else if (res.status === 409) {
-      setAddMsg('User is already a member.');
-    } else {
-      setAddMsg('Failed to add user.');
-    }
+    if (res.ok) { setAddEmail(''); setAddMsg(`${addEmail} added.`); await refresh(); }
+    else if (res.status === 404) setAddMsg('No account with that email.');
+    else if (res.status === 409) setAddMsg('Already a member.');
+    else setAddMsg('Failed to add user.');
   }
 
-  if (!channel) return <main><p>Loading…</p></main>;
+  if (!channel) return (
+    <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
+      <div style={{ color: 'var(--text-2)' }}>Loading…</div>
+    </div>
+  );
+
   return (
-    <main>
-      <h2>{channel.name}</h2>
-      <p>your role: {myRole}</p>
-
-      {live
-        ? <p>● Live now — <Link to={`/watch/${channel.code}`}>Watch</Link>
-            {canModerate && <button onClick={() => api.stopStream(id).then(refresh)}>Stop stream</button>}</p>
-        : <p><Link to={`/golive/${channel.code}`}>Go live</Link></p>}
-
-      {canModerate && (
-        <>
-          <p><button onClick={makeInvite}>Create invite link</button>
-            {invite && <code>{`${location.origin}/invite/${invite}`}</code>}</p>
-          <p>
-            Add user by email:{' '}
-            <input
-              aria-label="user email"
-              value={addEmail}
-              onChange={(e) => setAddEmail(e.target.value)}
-              placeholder="email"
-            />
-            <button onClick={addUserToChannel}>Add</button>
-            {addMsg && <small> {addMsg}</small>}
-          </p>
-        </>
-      )}
-
-      {isOwner && <p><button onClick={remove}>Delete channel</button></p>}
-
-      <h3>Members ({members.length})</h3>
-      <ul>
-        {members.map((m) => (
-          <li key={m.user_id}>
-            {m.email} — {m.role}{!m.can_stream && ' (blocked)'}
-            {canModerate && m.role !== 'owner' && (
-              <>
-                <button onClick={() => api.removeMember(id, m.user_id).then(refresh)}>kick</button>
-                <button onClick={() => api.setStreaming(id, m.user_id, m.can_stream === false).then(refresh)}>
-                  {m.can_stream === false ? 'unblock' : 'block'} streaming
-                </button>
-                {isOwner && (
-                  <>
-                    <button onClick={() => api.changeRole(id, m.user_id, m.role === 'admin' ? 'member' : 'admin').then(refresh)}>
-                      {m.role === 'admin' ? 'demote' : 'promote'}
-                    </button>
-                    <button onClick={() => api.transferOwner(id, m.user_id).then(refresh)}>make owner</button>
-                  </>
-                )}
+    <div className="page">
+      <div className="row-spread page-header">
+        <div>
+          <div className="row" style={{ marginBottom: '0.375rem' }}>
+            <Link to="/channels" style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>← Channels</Link>
+          </div>
+          <div className="row">
+            <h2>{channel.name}</h2>
+            {live && <span className="chip chip-live"><span className="live-dot" />Live</span>}
+          </div>
+          <div className="row" style={{ marginTop: '0.375rem' }}>
+            <span className={`badge badge-${myRole}`}>{myRole}</span>
+          </div>
+        </div>
+        <div className="row">
+          {live
+            ? <>
+                <Link to={`/watch/${channel.code}`} className="btn btn-live">Watch live</Link>
+                {canModerate && <button className="btn btn-danger btn-sm" onClick={() => api.stopStream(id).then(refresh)}>Stop</button>}
               </>
-            )}
-          </li>
-        ))}
-      </ul>
-    </main>
+            : <Link to={`/golive/${channel.code}`} className="btn btn-primary">Go live</Link>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: canModerate ? '1fr 1fr' : '1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+        {canModerate && (
+          <div className="card">
+            <div className="card-title">Invite link</div>
+            <div className="row">
+              <button className="btn btn-ghost btn-sm" onClick={makeInvite}>Generate</button>
+            </div>
+            {invite && <div className="code-block" style={{ marginTop: '0.75rem' }}>{`${location.origin}/invite/${invite}`}</div>}
+          </div>
+        )}
+        {canModerate && (
+          <div className="card">
+            <div className="card-title">Add member by email</div>
+            <div className="form-row">
+              <input className="input" value={addEmail} onChange={(e) => setAddEmail(e.target.value)}
+                placeholder="user@example.com" onKeyDown={(e) => e.key === 'Enter' && addUser()} />
+              <button className="btn btn-primary btn-sm" onClick={addUser}>Add</button>
+            </div>
+            {addMsg && <div className={`alert ${addMsg.includes('added') ? 'alert-success' : 'alert-error'}`} style={{ marginTop: '0.625rem' }}>{addMsg}</div>}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="row-spread" style={{ marginBottom: '1rem' }}>
+          <div className="card-title" style={{ margin: 0 }}>Members ({members.length})</div>
+          {isOwner && <button className="btn btn-danger btn-sm" onClick={remove}>Delete channel</button>}
+        </div>
+        <div className="member-list">
+          {members.map((m) => (
+            <div key={m.user_id} className="member-row">
+              <div className="member-avatar">{(m.email[0] ?? '?').toUpperCase()}</div>
+              <div className="member-info">
+                <div className="member-name">{m.email}</div>
+                <div className="member-sub">
+                  <span className={`badge badge-${m.role}`}>{m.role}</span>
+                  {!m.can_stream && <span className="badge badge-blocked" style={{ marginLeft: '0.375rem' }}>blocked</span>}
+                </div>
+              </div>
+              {canModerate && m.role !== 'owner' && (
+                <div className="member-actions">
+                  <button className="btn btn-ghost btn-sm"
+                    onClick={() => api.setStreaming(id, m.user_id, !m.can_stream).then(refresh)}>
+                    {m.can_stream ? 'Block' : 'Unblock'}
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={() => api.removeMember(id, m.user_id).then(refresh)}>
+                    Kick
+                  </button>
+                  {isOwner && (
+                    <>
+                      <button className="btn btn-ghost btn-sm"
+                        onClick={() => api.changeRole(id, m.user_id, m.role === 'admin' ? 'member' : 'admin').then(refresh)}>
+                        {m.role === 'admin' ? 'Demote' : 'Promote'}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => api.transferOwner(id, m.user_id).then(refresh)}>
+                        Make owner
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

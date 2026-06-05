@@ -116,10 +116,24 @@ export class ApiClient {
   async stopStream(id: string): Promise<void> {
     await this.fetchImpl(`${this.base}/channels/${id}/stream/stop`, { method: 'POST', headers: this.headers(false) });
   }
-  async me(): Promise<{ id: string; email: string; is_owner: boolean } | null> {
+  async me(): Promise<{ id: string; email: string; username: string; is_owner: boolean } | null> {
     if (!this.token) return null;
     const res = await this.fetchImpl(`${this.base}/me`, { method: 'GET', headers: this.headers(false) });
     return res.ok ? res.json() : null;
+  }
+
+  async updateMe(username: string): Promise<void> {
+    const res = await this.fetchImpl(`${this.base}/me`, {
+      method: 'PATCH', headers: this.headers(), body: JSON.stringify({ username }),
+    });
+    if (!res.ok) throw new Error('update failed');
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const res = await this.fetchImpl(`${this.base}/password`, {
+      method: 'POST', headers: this.headers(), body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    if (!res.ok) throw new Error('password change failed');
   }
 
   async listUsers(): Promise<{ id: string; email: string; created_at: string }[]> {

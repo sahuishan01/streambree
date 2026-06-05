@@ -34,7 +34,7 @@ pub fn router(state: AppState) -> Router {
         .route("/signup", post(handlers::signup))
         .route("/login", post(handlers::login))
         .route("/password", post(handlers::change_password))
-        .route("/me", get(handlers::me))
+        .route("/me", get(handlers::me).patch(handlers::update_me))
         .route("/users", get(handlers::list_users).post(handlers::create_user))
         .route("/users/:id", axum::routing::delete(handlers::delete_user))
         .route("/devices", get(handlers::list_devices).post(handlers::register_device))
