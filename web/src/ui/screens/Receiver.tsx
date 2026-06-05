@@ -3,7 +3,7 @@ import { useSession } from '../hooks/useSession';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws';
-const DEFAULT_GAIN = 1.5;
+const DEFAULT_GAIN = 1.2;
 
 export default function Receiver() {
   const [input, setInput] = useState('');
@@ -12,9 +12,10 @@ export default function Receiver() {
   const [showUnmute, setShowUnmute] = useState(false);
   const [gain, setGain] = useState(DEFAULT_GAIN);
   const videoRef  = useRef<HTMLVideoElement>(null);
-  const audioCtx  = useRef<AudioContext | null>(null);
-  const gainNode  = useRef<GainNode | null>(null);
-  const limiter   = useRef<DynamicsCompressorNode | null>(null);
+  const audioCtx   = useRef<AudioContext | null>(null);
+  const gainNode   = useRef<GainNode | null>(null);
+  const compressor = useRef<DynamicsCompressorNode | null>(null);
+  const limiter    = useRef<DynamicsCompressorNode | null>(null);
   const { state, remote } = useSession(WS, 'receiver', 'realtime', room);
 
   useEffect(() => {
@@ -35,19 +36,28 @@ export default function Receiver() {
     const ctx = new AudioContext();
     audioCtx.current = ctx;
 
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.knee.value      =   6;
+    comp.ratio.value     =   4;
+    comp.attack.value    = 0.003;
+    comp.release.value   = 0.25;
+    compressor.current = comp;
+
     const gn = ctx.createGain();
     gn.gain.value = DEFAULT_GAIN;
     gainNode.current = gn;
 
     const lim = ctx.createDynamicsCompressor();
-    lim.threshold.value = -2;
+    lim.threshold.value = -1;
     lim.knee.value      =  0;
     lim.ratio.value     = 20;
     lim.attack.value    = 0.001;
-    lim.release.value   = 0.15;
+    lim.release.value   = 0.1;
     limiter.current = lim;
 
-    ctx.createMediaElementSource(el).connect(gn);
+    ctx.createMediaElementSource(el).connect(comp);
+    comp.connect(gn);
     gn.connect(lim);
     lim.connect(ctx.destination);
 

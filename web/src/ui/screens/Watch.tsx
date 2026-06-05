@@ -7,14 +7,15 @@ import { ApiClient } from '../../api/rest';
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
 
-const DEFAULT_GAIN = 1.5;
+const DEFAULT_GAIN = 1.2;
 
 export default function Watch() {
   const { code = '' } = useParams();
   const videoRef  = useRef<HTMLVideoElement>(null);
-  const audioCtx  = useRef<AudioContext | null>(null);
-  const gainNode  = useRef<GainNode | null>(null);
-  const limiter   = useRef<DynamicsCompressorNode | null>(null);
+  const audioCtx   = useRef<AudioContext | null>(null);
+  const gainNode   = useRef<GainNode | null>(null);
+  const compressor = useRef<DynamicsCompressorNode | null>(null);
+  const limiter    = useRef<DynamicsCompressorNode | null>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
   const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
   const [showUnmute, setShowUnmute] = useState(false);
@@ -59,24 +60,34 @@ export default function Watch() {
     const ctx = new AudioContext();
     audioCtx.current = ctx;
 
-    // Gain — modest boost to raise WebRTC volume to match local playback.
+    // Stage 1 — compressor: reduces loud sustained sounds (music, ambience)
+    // more than sharp transients (hits, impacts), closing the dynamic range gap.
+    // 4:1 ratio with soft knee is transparent but audibly evens out the mix.
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -18;  // engage on most programme material
+    comp.knee.value      =   6;  // soft knee — gradual, not abrupt
+    comp.ratio.value     =   4;  // 4:1 gentle compression
+    comp.attack.value    = 0.003; // 3 ms — lets transients through first
+    comp.release.value   = 0.25; // 250 ms natural release
+    compressor.current = comp;
+
+    // Stage 2 — makeup gain: restore loudness lost to compression.
     const gn = ctx.createGain();
     gn.gain.value = DEFAULT_GAIN;
     gainNode.current = gn;
 
-    // Limiter — catches peaks before they clip, preserving the balance
-    // between transient effects (punches, explosions) and sustained sounds
-    // (music, ambience). High ratio + fast attack = transparent brick wall.
+    // Stage 3 — limiter: brick-wall ceiling so nothing ever clips.
     const lim = ctx.createDynamicsCompressor();
-    lim.threshold.value = -2;   // engage above -2 dBFS
-    lim.knee.value      =  0;   // hard knee — limiter not compressor
-    lim.ratio.value     = 20;   // 20:1 ≈ brick-wall limiter
-    lim.attack.value    = 0.001; // 1 ms — catches fast transients
-    lim.release.value   = 0.15; // 150 ms release
+    lim.threshold.value = -1;
+    lim.knee.value      =  0;
+    lim.ratio.value     = 20;
+    lim.attack.value    = 0.001;
+    lim.release.value   = 0.1;
     limiter.current = lim;
 
     const src = ctx.createMediaElementSource(el);
-    src.connect(gn);
+    src.connect(comp);
+    comp.connect(gn);
     gn.connect(lim);
     lim.connect(ctx.destination);
 
