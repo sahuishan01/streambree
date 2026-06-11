@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiClient, type Channel, type Member } from '../../api/rest';
 
@@ -35,6 +35,15 @@ export default function ChannelDetail() {
     setChannel(ch); setMembers(mb); setLive(lv);
   }
   useEffect(() => { void refresh(); }, [id]);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    pollRef.current = setInterval(async () => {
+      const lv = await api.streamStatus(id);
+      setLive(lv);
+    }, 3000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [id]);
 
   const myRole = channel?.role ?? 'member';
   const canModerate = myRole === 'owner' || myRole === 'admin';
