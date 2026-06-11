@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiClient } from '../../api/rest';
+import { SkeletonLine, SkeletonCard } from '../Skeleton';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 interface User { id: string; email: string; created_at: string; }
@@ -8,6 +9,7 @@ interface User { id: string; email: string; created_at: string; }
 export default function Users() {
   const [users, setUsers] = useState<User[]>([]);
   const [isOwner, setIsOwner] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState('');
@@ -25,6 +27,7 @@ export default function Users() {
     if (!me) { nav('/auth'); return; }
     setIsOwner(me.is_owner);
     if (me.is_owner) await refresh();
+    setLoading(false);
   }
 
   async function refresh() { setUsers(await api.listUsers()); }
@@ -51,11 +54,25 @@ export default function Users() {
     await refresh();
   }
 
-  if (!isOwner) return (
+  if (!isOwner && !loading) return (
     <div className="page page-narrow" style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔒</div>
-      <h3>Access denied</h3>
-      <p style={{ color: 'var(--text-2)', marginTop: '0.5rem' }}>Only the owner can manage users.</p>
+      <div className="empty-state">
+        <div className="empty-state-icon">🔒</div>
+        <h3>Access denied</h3>
+        <p style={{ color: 'var(--text-2)', marginTop: '0.5rem' }}>Only the owner can manage users.</p>
+      </div>
+    </div>
+  );
+
+  if (loading) return (
+    <div className="page" style={{ maxWidth: 680 }}>
+      <div className="page-header">
+        <SkeletonLine width="20%" />
+        <SkeletonLine width="35%" />
+      </div>
+      <SkeletonCard />
+      <div style={{ height: '1rem' }} />
+      <SkeletonCard />
     </div>
   );
 

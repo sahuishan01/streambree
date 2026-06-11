@@ -60,13 +60,31 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Derive a TURN-over-TLS URL from a `turn:` URL (same host, port 5349).
+/// Returns `None` if the URL already uses TLS.
+fn turn_tls_url(turn_url: &str) -> Option<String> {
+    if turn_url.starts_with("turns:") {
+        return None;
+    }
+    let host = turn_url.strip_prefix("turn:")?
+        .split(':')
+        .next()
+        .filter(|h| !h.is_empty())?;
+    Some(format!("turns:{host}:5349"))
+}
+
 /// Build the JSON describing ICE servers for a client (STUN + ephemeral TURN).
+/// Includes both UDP and TLS TURN so clients behind restrictive firewalls can connect.
 pub fn ice_servers_json(state: &AppState) -> serde_json::Value {
     let creds = turn::make_credentials_now(&state.turn_secret, state.turn_ttl);
+    let mut urls = vec![state.turn_url.as_str().to_string()];
+    if let Some(tls) = turn_tls_url(&state.turn_url) {
+        urls.push(tls);
+    }
     serde_json::json!([
         { "urls": [state.stun_url.as_str()] },
         {
-            "urls": [state.turn_url.as_str()],
+            "urls": urls,
             "username": creds.username,
             "credential": creds.password
         }

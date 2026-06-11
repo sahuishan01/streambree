@@ -3,12 +3,24 @@ import { useSession } from '../hooks/useSession';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws';
+const RECENT_KEY = 'sl_recent_rooms';
+
+function getRecent(): string[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); } catch { return []; }
+}
+
+function addRecent(code: string) {
+  const list = [code, ...getRecent().filter((c) => c !== code)].slice(0, 5);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+}
 
 export default function Receiver() {
   const [input, setInput] = useState('');
   const [room, setRoom] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showUnmute, setShowUnmute] = useState(false);
+  const [recent, setRecent] = useState<string[]>(getRecent);
+  const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const { state, remote } = useSession(WS, 'receiver', 'realtime', room);
 
@@ -24,6 +36,21 @@ export default function Receiver() {
     };
   }, [remote]);
 
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text') ?? '';
+      if (text.length >= 4 && /^[A-Z0-9]+$/i.test(text)) {
+        const upper = text.toUpperCase().slice(0, 10);
+        setInput(upper);
+        setRoom(upper);
+        addRecent(upper);
+        setError('');
+      }
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, []);
+
   function unmute() {
     const el = videoRef.current;
     if (!el) return;
@@ -32,9 +59,13 @@ export default function Receiver() {
     setShowUnmute(false);
   }
 
-  function join() {
-    if (input.trim().length < 4) { setError('Enter a valid room code.'); return; }
-    setError(''); setRoom(input.trim());
+  function join(code?: string) {
+    const val = (code ?? input).trim();
+    if (val.length < 4) { setError('Enter a valid room code.'); return; }
+    setError('');
+    setRoom(val);
+    addRecent(val);
+    setRecent(getRecent());
   }
 
   return (
@@ -48,15 +79,28 @@ export default function Receiver() {
         <div className="card">
           <div className="form">
             <div className="field">
-              <label className="field-label">Room code</label>
-              <input className="input" style={{ letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '1.125rem' }}
+              <label className="field-label" htmlFor="room-code">Room code</label>
+              <input id="room-code" ref={inputRef} className="input" style={{ letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '1.125rem' }}
                 value={input} onChange={(e) => setInput(e.target.value.toUpperCase())}
                 placeholder="XXXXXXXXXX" maxLength={10}
                 onKeyDown={(e) => e.key === 'Enter' && join()} />
             </div>
-            {error && <div className="alert alert-error">{error}</div>}
-            <button className="btn btn-primary" onClick={join} disabled={input.trim().length < 4}>Join</button>
+            {error && <div className="alert alert-error" role="alert">{error}</div>}
+            <button className="btn btn-primary" onClick={() => join()} disabled={input.trim().length < 4}>Join</button>
           </div>
+          {recent.length > 0 && (
+            <div style={{ marginTop: '1rem' }}>
+              <div className="section-label">Recent rooms</div>
+              <div className="row">
+                {recent.map((c) => (
+                  <button key={c} className="btn btn-ghost btn-sm" onClick={() => join(c)}
+                    style={{ letterSpacing: '0.06em', fontFamily: 'monospace' }}>
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -83,7 +127,7 @@ export default function Receiver() {
                 </button>
               </div>
             )}
-            <video ref={videoRef} playsInline controls />
+            <video ref={videoRef} playsInline controls aria-label="Remote stream" />
           </div>
         </>
       )}

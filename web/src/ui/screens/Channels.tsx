@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiClient, type Channel } from '../../api/rest';
+import { SkeletonCard } from '../Skeleton';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 
 export default function Channels() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [name, setName] = useState('');
-  const [isOwner, setIsOwner] = useState(false);
+  const [loading, setLoading] = useState(true);
   const nav = useNavigate();
   const api = new ApiClient(SERVER);
 
@@ -19,8 +20,8 @@ export default function Channels() {
   async function init() {
     const me = await api.me();
     if (!me) { nav('/auth'); return; }
-    setIsOwner(me.is_owner);
     await refresh();
+    setLoading(false);
   }
 
   async function refresh() {
@@ -41,7 +42,7 @@ export default function Channels() {
           <h2>Channels</h2>
           <p className="page-subtitle">Your broadcast rooms</p>
         </div>
-        {isOwner && <Link to="/users" className="btn btn-ghost btn-sm">Manage users</Link>}
+        
       </div>
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
@@ -55,11 +56,15 @@ export default function Channels() {
         </div>
       </div>
 
-      {channels.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-2)' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>📡</div>
-          <div style={{ fontWeight: 600, marginBottom: '0.375rem' }}>No channels yet</div>
-          <div style={{ fontSize: '0.875rem' }}>Create one above to get started</div>
+      {loading ? (
+        <div className="channel-grid">
+          {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+        </div>
+      ) : channels.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon">📡</div>
+          <div className="empty-state-title">No channels yet</div>
+          <div className="empty-state-desc">Create one above to get started</div>
         </div>
       ) : (
         <div className="channel-grid">

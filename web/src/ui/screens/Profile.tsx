@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ApiClient } from '../../api/rest';
+import { SkeletonLine, SkeletonBlock } from '../Skeleton';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 
@@ -11,6 +12,7 @@ export default function Profile() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [isOwner, setIsOwner] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [nameMsg, setNameMsg] = useState('');
   const [nameMsgType, setNameMsgType] = useState<'success'|'error'>('success');
   const [curPw, setCurPw] = useState('');
@@ -29,6 +31,7 @@ export default function Profile() {
     setEmail(me.email);
     setUsername(me.username ?? '');
     setIsOwner(me.is_owner);
+    setLoading(false);
   }
 
   async function saveName() {
@@ -53,6 +56,18 @@ export default function Profile() {
     }
   }
 
+  if (loading) return (
+    <div className="page" style={{ maxWidth: 560 }}>
+      <div className="page-header">
+        <SkeletonLine width="30%" />
+        <SkeletonLine width="45%" />
+      </div>
+      <SkeletonBlock />
+      <div style={{ height: '1rem' }} />
+      <SkeletonBlock />
+    </div>
+  );
+
   return (
     <div className="page" style={{ maxWidth: 560 }}>
       <div className="page-header">
@@ -66,10 +81,11 @@ export default function Profile() {
           <div>
             <div style={{ fontWeight: 600, fontSize: '1.0625rem' }}>{username || email}</div>
             <div style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>{email}</div>
-            <div style={{ marginTop: '0.375rem' }}>
+            <div style={{ marginTop: '0.375rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <span className={`badge ${isOwner ? 'badge-owner' : 'badge-member'}`}>
                 {isOwner ? 'Owner' : 'Member'}
               </span>
+              {isOwner && <Link to="/users" className="btn btn-ghost btn-sm">Manage users</Link>}
             </div>
           </div>
         </div>

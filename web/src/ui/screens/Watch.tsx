@@ -13,6 +13,8 @@ export default function Watch() {
   const [transport, setTransport] = useState<Transport>('unknown');
   const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
   const [showUnmute, setShowUnmute] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(true);
 
   useEffect(() => {
     let viewer: BroadcastViewer | null = null;
@@ -47,8 +49,18 @@ export default function Watch() {
     const el = videoRef.current;
     if (!el) return;
     el.muted = false;
-    el.volume = 1;
+    el.volume = volume;
+    setMuted(false);
     setShowUnmute(false);
+  }
+
+  function changeVolume(v: number) {
+    setVolume(v);
+    const el = videoRef.current;
+    if (!el) return;
+    el.volume = v;
+    if (v === 0) { el.muted = true; setMuted(true); }
+    else { el.muted = false; setMuted(false); setShowUnmute(false); }
   }
 
   const statusLabel = {
@@ -82,15 +94,26 @@ export default function Watch() {
             </div>
           </div>
         )}
-        {showUnmute && (
+        {showUnmute && muted && (
           <div className="video-overlay">
             <button className="btn btn-primary btn-lg" onClick={unmute}>
               🔊 Click to unmute
             </button>
           </div>
         )}
-        <video ref={videoRef} playsInline controls />
+        <video ref={videoRef} playsInline controls aria-label="Live stream" />
       </div>
+
+      {status === 'connected' && (
+        <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card-title">Audio</div>
+          <div className="volume-row">
+            <span className="volume-icon">{muted || volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}</span>
+            <input type="range" min="0" max="1" step="0.05" value={volume}
+              onChange={(e) => changeVolume(parseFloat(e.target.value))} aria-label="Volume" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

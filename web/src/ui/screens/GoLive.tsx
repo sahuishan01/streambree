@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
 import { captureScreen, captureCamera, captureFile, isAudioFile } from '../../core/sources';
 import { BroadcastSender } from '../../core/broadcast-session';
 import { ApiClient } from '../../api/rest';
+import { useToast } from '../toast';
 
 type SourceKind = 'screen' | 'camera' | 'file';
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
@@ -11,6 +12,8 @@ const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
 const canShareScreen = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
 export default function GoLive() {
+  const nav = useNavigate();
+  useEffect(() => { if (!localStorage.getItem('sl_token')) nav('/auth'); }, []);
   const { code = '' } = useParams();
   const [source, setSource] = useState<SourceKind>(canShareScreen ? 'screen' : 'file');
   const [mode, setMode] = useState<Mode>('realtime');
@@ -19,10 +22,13 @@ export default function GoLive() {
   const [live, setLive] = useState(false);
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
+  const [elapsed, setElapsed] = useState('');
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const fileAudioRef = useRef<HTMLAudioElement>(null);
   const senderRef = useRef<BroadcastSender | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const api = new ApiClient(SERVER);
+  const { toast } = useToast();
 
   const audioOnly = file ? isAudioFile(file) : false;
 
@@ -43,7 +49,11 @@ export default function GoLive() {
   async function start() {
     try {
       const stream = await capture();
-      setNoAudio(stream.getAudioTracks().length === 0);
+      const hasAudio = stream.getAudioTracks().length > 0;
+      setNoAudio(!hasAudio);
+      if (!hasAudio && source === 'screen') {
+        toast('warning', 'No audio — viewers will hear silence. Share a browser tab with audio enabled.');
+      }
       const ice = await api.turnCredentials();
       const sender = new BroadcastSender(WS, api.token ?? '', code, mode, stream, ice);
       sender.onViewerCount(setViewers);
@@ -51,12 +61,21 @@ export default function GoLive() {
       sender.start();
       senderRef.current = sender;
       setLive(true); setError('');
+      const t0 = Date.now();
+      timerRef.current = setInterval(() => {
+        const s = Math.floor((Date.now() - t0) / 1000);
+        setElapsed(`${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`);
+      }, 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  function stop() { senderRef.current?.close(); setLive(false); setViewers(0); }
+  function stop() {
+    senderRef.current?.close(); setLive(false); setViewers(0);
+    if (timerRef.current) clearInterval(timerRef.current);
+    setElapsed('');
+  }
 
   return (
     <div className="page" style={{ maxWidth: 680 }}>
@@ -123,11 +142,22 @@ export default function GoLive() {
           <div className="stat-bar" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
             <div className="stat">
               <div className="stat-val">{viewers}</div>
-              <div className="stat-lbl">Viewers</div>
+              <div className="stat-lbl">{viewers === 1 ? 'Viewer' : 'Viewers'}</div>
             </div>
+            {elapsed && (
+              <div className="stat">
+                <div className="stat-val timer">{elapsed}</div>
+                <div className="stat-lbl">Elapsed</div>
+              </div>
+            )}
           </div>
+          {viewers === 0 && (
+            <p style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+              Waiting for viewers to join…
+            </p>
+          )}
           {noAudio && (
-            <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }}>
+            <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }} role="alert">
               No audio track — viewers hear no sound. For screen share, enable "Share audio" and restart.
               For files, check the codec (AC3/DTS unsupported; convert to AAC).
             </div>

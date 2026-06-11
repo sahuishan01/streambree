@@ -1,13 +1,7 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 export default function Home() {
-  const navigate = useNavigate();
   const loggedIn = !!localStorage.getItem('sl_token');
-
-  function logout() {
-    localStorage.removeItem('sl_token');
-    navigate('/auth');
-  }
 
   return (
     <div className="page">
@@ -27,14 +21,6 @@ export default function Home() {
             ? <Link to="/channels" className="btn btn-ghost btn-lg">My channels</Link>
             : <Link to="/auth" className="btn btn-ghost btn-lg">Sign in</Link>}
         </div>
-        {loggedIn && (
-          <p style={{ marginTop: '1.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>
-            Signed in ·{' '}
-            <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex' }} onClick={logout}>
-              Sign out
-            </button>
-          </p>
-        )}
       </div>
 
       <div className="features">

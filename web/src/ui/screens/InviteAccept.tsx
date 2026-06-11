@@ -47,7 +47,10 @@ export default function InviteAccept() {
         {!name && !error && <div style={{ color: 'var(--text-2)' }}>Loading…</div>}
       </div>
       {!api.token && (
-        <div className="auth-footer">Need an account? <a href="/auth">Sign in</a></div>
+        <div className="auth-footer">
+          Need an account?{' '}
+          <a href={`/auth?redirect=/invite/${code}`}>Sign in</a>
+        </div>
       )}
     </div>
   );

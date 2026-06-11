@@ -1,7 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
 import { captureScreen, captureCamera, captureFile, isAudioFile } from '../../core/sources';
 import { useSession } from '../hooks/useSession';
+import { useToast } from '../toast';
 
 type SourceKind = 'screen' | 'camera' | 'file';
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
@@ -9,6 +11,8 @@ const WS = SERVER.replace(/^http/, 'ws') + '/ws';
 const canShareScreen = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
 export default function Sender() {
+  const nav = useNavigate();
+  useEffect(() => { if (!localStorage.getItem('sl_token')) nav('/auth'); }, []);
   const [source, setSource] = useState<SourceKind>(canShareScreen ? 'screen' : 'file');
   const [mode, setMode] = useState<Mode>('realtime');
   const [room, setRoom] = useState<string | null>(null);
@@ -17,9 +21,11 @@ export default function Sender() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
+  const [copied, setCopied] = useState(false);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const fileAudioRef = useRef<HTMLAudioElement>(null);
   const { state } = useSession(WS, 'sender', mode, room, stream);
+  const { toast } = useToast();
 
   const audioOnly = file ? isAudioFile(file) : false;
 
@@ -50,9 +56,20 @@ export default function Sender() {
       setNoAudio(!captured.getAudioTracks().length);
       setStream(captured);
       const c = makeCode();
-      setCode(c); setRoom(c); setError('');
+      setCode(c); setRoom(c); setError(''); setCopied(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start capture.');
+    }
+  }
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      toast('success', 'Room code copied to clipboard');
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast('error', 'Could not copy code');
     }
   }
 
@@ -122,8 +139,13 @@ export default function Sender() {
         ) : (
           <div className="card">
             <div className="card-title">Share this code</div>
-            <div className="code-block" style={{ fontSize: '1.25rem', letterSpacing: '0.1em', textAlign: 'center', padding: '1rem' }}>{code}</div>
-            <div className="row" style={{ marginTop: '0.75rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>
+            <div className="copy-row" style={{ marginBottom: '0.75rem' }}>
+              <input className="input" readOnly value={code} style={{ letterSpacing: '0.1em', textAlign: 'center', fontSize: '1.125rem' }} />
+              <button className="btn btn-primary" onClick={copyCode}>
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <div className="row" style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>
               <span className={`chip${state.conn === 'connected' ? ' chip-live' : ''}`}>
                 {state.conn === 'connected' && <span className="live-dot" />}
                 {state.conn}

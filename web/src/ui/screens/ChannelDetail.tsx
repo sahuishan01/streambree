@@ -2,6 +2,19 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiClient, type Channel, type Member } from '../../api/rest';
 
+function StreamingTimer() {
+  const [elapsed, setElapsed] = useState('0:00');
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      setElapsed(`${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <span className="timer">{elapsed}</span>;
+}
+
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 
 export default function ChannelDetail() {
@@ -26,6 +39,8 @@ export default function ChannelDetail() {
   const myRole = channel?.role ?? 'member';
   const canModerate = myRole === 'owner' || myRole === 'admin';
   const isOwner = myRole === 'owner';
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailValid = addEmail.length === 0 || emailRegex.test(addEmail);
 
   async function makeInvite() { setInvite(await api.createInvite(id)); }
   async function remove() { if (!confirm(`Delete "${channel?.name}"?`)) return; await api.deleteChannel(id); nav('/channels'); }
@@ -56,6 +71,11 @@ export default function ChannelDetail() {
           <div className="row">
             <h2>{channel.name}</h2>
             {live && <span className="chip chip-live"><span className="live-dot" />Live</span>}
+            {live && (
+              <span className="chip">
+                <StreamingTimer />
+              </span>
+            )}
           </div>
           <div className="row" style={{ marginTop: '0.375rem' }}>
             <span className={`badge badge-${myRole}`}>{myRole}</span>
@@ -85,11 +105,14 @@ export default function ChannelDetail() {
           <div className="card">
             <div className="card-title">Add member by email</div>
             <div className="form-row">
-              <input className="input" value={addEmail} onChange={(e) => setAddEmail(e.target.value)}
-                placeholder="user@example.com" onKeyDown={(e) => e.key === 'Enter' && addUser()} />
-              <button className="btn btn-primary btn-sm" onClick={addUser}>Add</button>
+              <input className={`input${addEmail.length > 0 && !emailValid ? ' input-error' : ''}`}
+                value={addEmail} onChange={(e) => setAddEmail(e.target.value)}
+                placeholder="user@example.com" type="email"
+                onKeyDown={(e) => e.key === 'Enter' && emailValid && addUser()} />
+              <button className="btn btn-primary btn-sm" onClick={addUser} disabled={!emailValid}>Add</button>
             </div>
-            {addMsg && <div className={`alert ${addMsg.includes('added') ? 'alert-success' : 'alert-error'}`} style={{ marginTop: '0.625rem' }}>{addMsg}</div>}
+            {addEmail.length > 0 && !emailValid && <div className="field-hint error">Enter a valid email address</div>}
+            {addMsg && <div className={`alert ${addMsg.includes('added') ? 'alert-success' : 'alert-error'}`} style={{ marginTop: '0.625rem' }} role="alert">{addMsg}</div>}
           </div>
         )}
       </div>

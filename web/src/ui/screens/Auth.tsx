@@ -1,25 +1,28 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiClient } from '../../api/rest';
+import { useToast } from '../toast';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 
 export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const api = new ApiClient(SERVER);
+  const { toast } = useToast();
 
-  async function run(kind: 'login' | 'signup') {
+  async function run() {
     setMsg(''); setLoading(true);
     try {
-      if (kind === 'login') await api.login(email, password);
-      else await api.signup(email, password);
+      await api.login(email, password);
+      toast('success', 'Signed in');
       navigate('/channels');
     } catch {
-      setMsg(kind === 'login' ? 'Incorrect email or password.' : 'Could not create account — email may already be taken.');
+      setMsg('Incorrect email or password.');
     } finally {
       setLoading(false);
     }
@@ -36,29 +39,27 @@ export default function Auth() {
         <div className="form">
           <div className="field">
             <label className="field-label" htmlFor="email">Email</label>
-            <input id="email" className="input" type="email" value={email}
+            <input id="email" className="input" type="email" value={email} autoComplete="email"
               onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
-              onKeyDown={(e) => e.key === 'Enter' && run('login')} />
+              onKeyDown={(e) => e.key === 'Enter' && run()} />
           </div>
           <div className="field">
             <label className="field-label" htmlFor="password">Password</label>
-            <input id="password" className="input" type="password" value={password}
-              onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
-              onKeyDown={(e) => e.key === 'Enter' && run('login')} />
+            <div className="pw-wrap">
+              <input id="password" className="input" type={showPw ? 'text' : 'password'} value={password} autoComplete="current-password"
+                onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
+                onKeyDown={(e) => e.key === 'Enter' && run()} />
+              <button className="pw-toggle" type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>
+                {showPw ? '🙈' : '👁'}
+              </button>
+            </div>
           </div>
-          {msg && <div className="alert alert-error">{msg}</div>}
+          {msg && <div className="alert alert-error" role="alert">{msg}</div>}
           <button className="btn btn-primary" style={{ width: '100%' }}
-            onClick={() => run('login')} disabled={loading}>
+            onClick={run} disabled={loading || password.length < 1}>
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
-      </div>
-
-      <div className="auth-footer">
-        Don't have an account?{' '}
-        <button className="btn btn-ghost btn-sm" onClick={() => run('signup')} disabled={loading}>
-          Sign up
-        </button>
       </div>
     </div>
   );

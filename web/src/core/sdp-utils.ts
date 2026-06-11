@@ -13,7 +13,7 @@ export function enhanceAudioSdp(sdp: string): string {
 
   let opusPt: string | null = null;
   for (const line of lines) {
-    const m = line.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+    const m = line.match(/a=rtpmap:(\d+) opus\/48000(?:\/2)?/i);
     if (m) { opusPt = m[1]; break; }
   }
   if (!opusPt) return sdp;

@@ -34,7 +34,7 @@ export async function applyMode(peer: ModeTarget, mode: Mode): Promise<void> {
     const { degradationPreference, maxBitrate } = senderParams(mode);
     params.degradationPreference = degradationPreference;
     params.encodings[0].maxBitrate = maxBitrate;
-    await videoSender.setParameters(params);
+    await videoSender.setParameters(params).catch(() => {});
   }
 
   const audioSender = peer.getSenders().find((s) => s.track?.kind === 'audio');
