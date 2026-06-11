@@ -1,3 +1,18 @@
+let wakeLock: WakeLockSentinel | null = null;
+
+export async function requestWakeLock(): Promise<void> {
+  if (!navigator.wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch { /* wake lock denied */ }
+}
+
+export function releaseWakeLock(): void {
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+}
+
 export async function captureScreen(): Promise<MediaStream> {
   return navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
 }
@@ -10,6 +25,39 @@ type CaptureEl = (HTMLVideoElement | HTMLAudioElement) & {
   captureStream?: () => MediaStream;
   mozCaptureStream?: () => MediaStream;
 };
+
+/** Keep a media element alive on mobile — restart if Chrome suspends it in background. */
+export function keepFileAlive(el: HTMLVideoElement | HTMLAudioElement): () => void {
+  let playing = true;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function restart() {
+    if (!playing) return;
+    if (el.paused && el.src) {
+      el.play().catch(() => {});
+    }
+  }
+
+  const onPause = () => {
+    // Chrome on Android pauses the element when the tab is backgrounded.
+    // Try to restart after a short delay so we don't fight a legitimate user pause.
+    restartTimer = setTimeout(restart, 500);
+  };
+
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible') restart();
+  };
+
+  el.addEventListener('pause', onPause);
+  document.addEventListener('visibilitychange', onVisibility);
+
+  return () => {
+    playing = false;
+    if (restartTimer) clearTimeout(restartTimer);
+    el.removeEventListener('pause', onPause);
+    document.removeEventListener('visibilitychange', onVisibility);
+  };
+}
 
 export async function captureFile(file: File, el: CaptureEl): Promise<MediaStream> {
   el.srcObject = null;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
-import { captureScreen, captureCamera, captureFile, isAudioFile } from '../../core/sources';
+import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, requestWakeLock, releaseWakeLock } from '../../core/sources';
 import { BroadcastSender } from '../../core/broadcast-session';
 import { ApiClient } from '../../api/rest';
 import { useToast } from '../toast';
@@ -27,6 +27,7 @@ export default function GoLive() {
   const fileAudioRef = useRef<HTMLAudioElement>(null);
   const senderRef = useRef<BroadcastSender | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const keepAliveRef = useRef<(() => void) | null>(null);
   const api = new ApiClient(SERVER);
   const { toast } = useToast();
 
@@ -61,6 +62,11 @@ export default function GoLive() {
       sender.start();
       senderRef.current = sender;
       setLive(true); setError('');
+      void requestWakeLock();
+      if (source === 'file') {
+        const el = audioOnly ? fileAudioRef.current : fileVideoRef.current;
+        if (el) keepAliveRef.current = keepFileAlive(el);
+      }
       const t0 = Date.now();
       timerRef.current = setInterval(() => {
         const s = Math.floor((Date.now() - t0) / 1000);
@@ -75,6 +81,9 @@ export default function GoLive() {
     senderRef.current?.close(); setLive(false); setViewers(0);
     if (timerRef.current) clearInterval(timerRef.current);
     setElapsed('');
+    releaseWakeLock();
+    keepAliveRef.current?.();
+    keepAliveRef.current = null;
   }
 
   return (

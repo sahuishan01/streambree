@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
-import { captureScreen, captureCamera, captureFile, isAudioFile } from '../../core/sources';
+import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, requestWakeLock, releaseWakeLock } from '../../core/sources';
 import { useSession } from '../hooks/useSession';
 import { useToast } from '../toast';
 
@@ -24,8 +24,17 @@ export default function Sender() {
   const [copied, setCopied] = useState(false);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const fileAudioRef = useRef<HTMLAudioElement>(null);
+  const keepAliveRef = useRef<(() => void) | null>(null);
   const { state } = useSession(WS, 'sender', mode, room, stream);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!room) {
+      releaseWakeLock();
+      keepAliveRef.current?.();
+      keepAliveRef.current = null;
+    }
+  }, [room]);
 
   const audioOnly = file ? isAudioFile(file) : false;
 
@@ -57,6 +66,11 @@ export default function Sender() {
       setStream(captured);
       const c = makeCode();
       setCode(c); setRoom(c); setError(''); setCopied(false);
+      void requestWakeLock();
+      if (source === 'file') {
+        const el = audioOnly ? fileAudioRef.current : fileVideoRef.current;
+        if (el) keepAliveRef.current = keepFileAlive(el);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start capture.');
     }
