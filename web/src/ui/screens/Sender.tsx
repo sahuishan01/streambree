@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
-import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, requestWakeLock, releaseWakeLock } from '../../core/sources';
+import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, requestWakeLock, releaseWakeLock, mergeStreams } from '../../core/sources';
 import { useSession } from '../hooks/useSession';
 import { useToast } from '../toast';
 
@@ -22,8 +22,11 @@ export default function Sender() {
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [camOn, setCamOn] = useState(false);
+  const [camStream, setCamStream] = useState<MediaStream | undefined>();
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const fileAudioRef = useRef<HTMLAudioElement>(null);
+  const camPreviewRef = useRef<HTMLVideoElement>(null);
   const keepAliveRef = useRef<(() => void) | null>(null);
   const { state } = useSession(WS, 'sender', mode, room, stream);
   const { toast } = useToast();
@@ -59,9 +62,30 @@ export default function Sender() {
     return Array.from(buf, (n) => a[n % a.length]).join('');
   }
 
+  async function toggleCam() {
+    if (camStream) {
+      camStream.getTracks().forEach((t) => t.stop());
+      setCamStream(undefined);
+      setCamOn(false);
+      return;
+    }
+    try {
+      const s = await captureCamera(true);
+      setCamStream(s);
+      setCamOn(true);
+      if (camPreviewRef.current) {
+        camPreviewRef.current.srcObject = s;
+        camPreviewRef.current.play().catch(() => {});
+      }
+    } catch {
+      toast('error', 'Could not access camera');
+    }
+  }
+
   async function createSession() {
     try {
-      const captured = await capture();
+      let captured = await capture();
+      if (camStream) captured = mergeStreams(captured, camStream);
       setNoAudio(!captured.getAudioTracks().length);
       setStream(captured);
       const c = makeCode();
@@ -125,6 +149,20 @@ export default function Sender() {
             </div>
           )}
         </div>
+
+        {(source === 'screen' || source === 'file') && (
+          <div className="card">
+            <div className="card-title">Camera overlay</div>
+            <label className="radio-opt" style={{ display: 'inline-flex' }}>
+              <input type="checkbox" checked={camOn} onChange={toggleCam} style={{ marginRight: '0.375rem' }} />
+              📷 Show camera picture-in-picture
+            </label>
+            {camOn && camPreviewRef && (
+              <video ref={camPreviewRef} playsInline muted
+                style={{ width: '100%', maxWidth: 200, borderRadius: 'var(--r)', marginTop: '0.75rem', aspectRatio: '4/3', objectFit: 'cover', background: '#000' }} />
+            )}
+          </div>
+        )}
 
         <div className="card">
           <div className="card-title">Quality mode</div>

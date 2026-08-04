@@ -17,8 +17,19 @@ export async function captureScreen(): Promise<MediaStream> {
   return navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
 }
 
-export async function captureCamera(): Promise<MediaStream> {
-  return navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+export async function captureCamera(videoOnly = false): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia({ video: true, audio: !videoOnly });
+}
+
+/** Merge all tracks from additional streams into a primary MediaStream. */
+export function mergeStreams(primary: MediaStream, ...others: MediaStream[]): MediaStream {
+  for (const other of others) {
+    for (const track of other.getTracks()) {
+      if (!primary.getTracks().includes(track)) primary.addTrack(track);
+    }
+    other.getTracks().forEach((t) => t.stop());
+  }
+  return primary;
 }
 
 type CaptureEl = (HTMLVideoElement | HTMLAudioElement) & {

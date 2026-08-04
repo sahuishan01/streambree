@@ -19,9 +19,11 @@ export default function Receiver() {
   const [room, setRoom] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showUnmute, setShowUnmute] = useState(false);
+  const [hasCam, setHasCam] = useState(false);
   const [recent, setRecent] = useState<string[]>(getRecent);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pipRef = useRef<HTMLVideoElement>(null);
   const { state, remote } = useSession(WS, 'receiver', 'realtime', room);
 
   useEffect(() => {
@@ -29,6 +31,17 @@ export default function Receiver() {
     if (!remote || !el) return;
     el.srcObject = remote;
     el.muted = true;
+
+    const videos = remote.getVideoTracks();
+    const multiCam = videos.length > 1;
+    setHasCam(multiCam);
+
+    if (multiCam && pipRef.current) {
+      const camStream = new MediaStream([videos[1]]);
+      pipRef.current.srcObject = camStream;
+      pipRef.current.play().catch(() => {});
+    }
+
     el.oncanplay = () => {
       el.oncanplay = null;
       el.play().catch(() => {});
@@ -128,6 +141,7 @@ export default function Receiver() {
               </div>
             )}
             <video ref={videoRef} playsInline controls aria-label="Remote stream" />
+            {hasCam && <video ref={pipRef} playsInline muted style={{ position: 'absolute', bottom: '1rem', right: '1rem', width: '30%', maxWidth: 180, borderRadius: 'var(--r)', border: '2px solid var(--border)', background: '#000', aspectRatio: '4/3', objectFit: 'cover' }} />}
           </div>
         </>
       )}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Mode } from '../../core/protocol';
-import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, requestWakeLock, releaseWakeLock } from '../../core/sources';
+import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, requestWakeLock, releaseWakeLock, mergeStreams } from '../../core/sources';
 import { BroadcastSender } from '../../core/broadcast-session';
 import { ApiClient } from '../../api/rest';
 import { useToast } from '../toast';
@@ -23,6 +23,9 @@ export default function GoLive() {
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
   const [elapsed, setElapsed] = useState('');
+  const [camOn, setCamOn] = useState(false);
+  const [camStream, setCamStream] = useState<MediaStream | undefined>();
+  const camPreviewRef = useRef<HTMLVideoElement>(null);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const fileAudioRef = useRef<HTMLAudioElement>(null);
   const senderRef = useRef<BroadcastSender | null>(null);
@@ -47,9 +50,30 @@ export default function GoLive() {
     return captureScreen();
   }
 
+  async function toggleCam() {
+    if (camStream) {
+      camStream.getTracks().forEach((t) => t.stop());
+      setCamStream(undefined);
+      setCamOn(false);
+      return;
+    }
+    try {
+      const s = await captureCamera(true);
+      setCamStream(s);
+      setCamOn(true);
+      if (camPreviewRef.current) {
+        camPreviewRef.current.srcObject = s;
+        camPreviewRef.current.play().catch(() => {});
+      }
+    } catch {
+      toast('error', 'Could not access camera');
+    }
+  }
+
   async function start() {
     try {
-      const stream = await capture();
+      let stream = await capture();
+      if (camStream) stream = mergeStreams(stream, camStream);
       const hasAudio = stream.getAudioTracks().length > 0;
       setNoAudio(!hasAudio);
       if (!hasAudio && source === 'screen') {
@@ -84,6 +108,9 @@ export default function GoLive() {
     releaseWakeLock();
     keepAliveRef.current?.();
     keepAliveRef.current = null;
+    camStream?.getTracks().forEach((t) => t.stop());
+    setCamStream(undefined);
+    setCamOn(false);
   }
 
   return (
@@ -125,6 +152,20 @@ export default function GoLive() {
               </div>
             )}
           </div>
+
+          {(source === 'screen' || source === 'file') && (
+            <div className="card">
+              <div className="card-title">Camera overlay</div>
+              <label className="radio-opt" style={{ display: 'inline-flex' }}>
+                <input type="checkbox" checked={camOn} onChange={toggleCam} style={{ marginRight: '0.375rem' }} />
+                📷 Show camera picture-in-picture
+              </label>
+              {camOn && camPreviewRef && (
+                <video ref={camPreviewRef} playsInline muted
+                  style={{ width: '100%', maxWidth: 200, borderRadius: 'var(--r)', marginTop: '0.75rem', aspectRatio: '4/3', objectFit: 'cover', background: '#000' }} />
+              )}
+            </div>
+          )}
 
           <div className="card">
             <div className="card-title">Quality mode</div>

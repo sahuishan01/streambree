@@ -10,9 +10,11 @@ const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
 export default function Watch() {
   const { code = '' } = useParams();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pipRef = useRef<HTMLVideoElement>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
   const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
   const [showUnmute, setShowUnmute] = useState(false);
+  const [hasCam, setHasCam] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(true);
 
@@ -28,6 +30,15 @@ export default function Watch() {
           if (!el) return;
           el.srcObject = s;
           el.muted = true;
+
+          const videos = s.getVideoTracks();
+          const multiCam = videos.length > 1;
+          setHasCam(multiCam);
+          if (multiCam && pipRef.current) {
+            pipRef.current.srcObject = new MediaStream([videos[1]]);
+            pipRef.current.play().catch(() => {});
+          }
+
           el.oncanplay = () => {
             el.oncanplay = null;
             el.play().catch(() => {});
@@ -102,6 +113,7 @@ export default function Watch() {
           </div>
         )}
         <video ref={videoRef} playsInline controls aria-label="Live stream" />
+        {hasCam && <video ref={pipRef} playsInline muted style={{ position: 'absolute', bottom: '1rem', right: '1rem', width: '30%', maxWidth: 180, borderRadius: 'var(--r)', border: '2px solid var(--border)', background: '#000', aspectRatio: '4/3', objectFit: 'cover' }} />}
       </div>
 
       {status === 'connected' && (
