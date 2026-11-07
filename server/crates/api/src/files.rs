@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use crate::handlers::require_user;
 use crate::AppState;
 
 const SHARED_DIR: &str = "/srv/streambree/shared";
@@ -101,10 +102,16 @@ pub async fn list_files(
 }
 
 pub async fn upload_file(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<ListQuery>,
     mut multipart: Multipart,
 ) -> Result<StatusCode, StatusCode> {
+    let caller = require_user(&state, &headers)?;
+    if !state.store.is_owner(&caller).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let target_dir = sanitize_path(SHARED_DIR, query.path.as_deref())?;
     if !target_dir.exists() {
         fs::create_dir_all(&target_dir).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -135,9 +142,15 @@ pub async fn upload_file(
 }
 
 pub async fn create_folder(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<MkdirBody>,
 ) -> Result<StatusCode, StatusCode> {
+    let caller = require_user(&state, &headers)?;
+    if !state.store.is_owner(&caller).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let name = body.name.trim();
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(StatusCode::BAD_REQUEST);
@@ -155,9 +168,15 @@ pub async fn create_folder(
 }
 
 pub async fn delete_item(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<ListQuery>,
 ) -> Result<StatusCode, StatusCode> {
+    let caller = require_user(&state, &headers)?;
+    if !state.store.is_owner(&caller).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let target = sanitize_path(SHARED_DIR, query.path.as_deref())?;
     if !target.exists() {
         return Err(StatusCode::NOT_FOUND);

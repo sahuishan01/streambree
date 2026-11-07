@@ -37,6 +37,7 @@ export default function App() {
           <Route path="/users"          element={<Page><Users /></Page>} />
           <Route path="/profile"        element={<Page><Profile /></Page>} />
           <Route path="/shared-files"   element={<Page><SharedFiles /></Page>} />
+          <Route path="/shared"         element={<Page><SharedFiles /></Page>} />
         </Routes>
       </Layout>
     </ToastProvider>

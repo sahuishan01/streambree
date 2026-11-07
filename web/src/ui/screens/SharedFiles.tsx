@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { ApiClient } from '../../api/rest';
 import { useToast } from '../toast';
 
 interface FileEntry {
@@ -28,23 +29,18 @@ function formatDate(iso: string | null): string {
 function getIcon(isDir: boolean, ext: string): { icon: string; bg: string; color: string } {
   if (isDir) return { icon: '📁', bg: 'rgba(234, 179, 8, 0.15)', color: '#eab308' };
   
-  // Media / Audio
   if (['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a', 'aac'].includes(ext)) {
     return { icon: '🎵', bg: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' };
   }
-  // Video
   if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) {
     return { icon: '🎬', bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171' };
   }
-  // Images
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
     return { icon: '🖼️', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' };
   }
-  // Documents / Code
   if (['pdf', 'txt', 'md', 'json', 'yaml', 'yml', 'rs', 'ts', 'js'].includes(ext)) {
     return { icon: '📄', bg: 'rgba(34, 197, 94, 0.15)', color: '#4ade80' };
   }
-  // Archives / Torrents
   if (['zip', 'tar', 'gz', '7z', 'rar', 'torrent'].includes(ext)) {
     return { icon: '📦', bg: 'rgba(249, 115, 22, 0.15)', color: '#fb923c' };
   }
@@ -55,6 +51,7 @@ export default function SharedFiles() {
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOwner, setIsOwner] = useState(false);
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [isUploading, setIsUploading] = useState(false);
@@ -64,6 +61,21 @@ export default function SharedFiles() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const api = new ApiClient(SERVER);
+
+  useEffect(() => {
+    void checkOwner();
+    void loadFiles(currentPath);
+  }, [currentPath]);
+
+  async function checkOwner() {
+    try {
+      const me = await api.me();
+      setIsOwner(Boolean(me?.is_owner));
+    } catch {
+      setIsOwner(false);
+    }
+  }
 
   async function loadFiles(path = currentPath) {
     setLoading(true);
@@ -79,10 +91,6 @@ export default function SharedFiles() {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    void loadFiles(currentPath);
-  }, [currentPath]);
 
   function navigateTo(folder: string) {
     const next = currentPath ? `${currentPath}/${folder}` : folder;
@@ -102,6 +110,7 @@ export default function SharedFiles() {
     const uploadFiles = e.target.files;
     if (!uploadFiles || uploadFiles.length === 0) return;
 
+    const token = localStorage.getItem('sl_token');
     const form = new FormData();
     for (let i = 0; i < uploadFiles.length; i++) {
       form.append('files', uploadFiles[i]);
@@ -110,15 +119,22 @@ export default function SharedFiles() {
     setIsUploading(true);
     try {
       const q = currentPath ? `?path=${encodeURIComponent(currentPath)}` : '';
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${SERVER}/shared-files${q}`, {
         method: 'POST',
+        headers,
         body: form,
       });
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) {
+        if (res.status === 403) throw new Error('Admin authorization required to upload');
+        throw new Error('Upload failed');
+      }
       toast('success', `Uploaded ${uploadFiles.length} file(s)`);
       void loadFiles(currentPath);
-    } catch {
-      toast('error', 'File upload failed');
+    } catch (err: any) {
+      toast('error', err.message || 'File upload failed');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -129,13 +145,18 @@ export default function SharedFiles() {
     e.preventDefault();
     if (!newFolderName.trim()) return;
 
+    const token = localStorage.getItem('sl_token');
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${SERVER}/shared-files/mkdir`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ path: currentPath || undefined, name: newFolderName.trim() }),
       });
       if (!res.ok) {
+        if (res.status === 403) throw new Error('Admin authorization required');
         if (res.status === 409) throw new Error('Folder already exists');
         throw new Error('Create folder failed');
       }
@@ -151,21 +172,29 @@ export default function SharedFiles() {
   async function handleDelete(name: string) {
     if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
     const targetPath = currentPath ? `${currentPath}/${name}` : name;
+    const token = localStorage.getItem('sl_token');
     try {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`${SERVER}/shared-files?path=${encodeURIComponent(targetPath)}`, {
         method: 'DELETE',
+        headers,
       });
-      if (!res.ok) throw new Error('Delete failed');
+      if (!res.ok) {
+        if (res.status === 403) throw new Error('Admin authorization required');
+        throw new Error('Delete failed');
+      }
       toast('success', `Deleted "${name}"`);
       void loadFiles(currentPath);
-    } catch {
-      toast('error', 'Could not delete item');
+    } catch (err: any) {
+      toast('error', err.message || 'Could not delete item');
     }
   }
 
   function getDownloadUrl(item: FileEntry): string {
     const rel = currentPath ? `${currentPath}/${item.name}` : item.name;
-    return `/shared/${encodeURIComponent(rel).replace(/%2F/g, '/')}`;
+    return `/raw-shared/${encodeURIComponent(rel).replace(/%2F/g, '/')}`;
   }
 
   function handleItemClick(item: FileEntry) {
@@ -196,42 +225,48 @@ export default function SharedFiles() {
       <div className="row-spread page-header" style={{ alignItems: 'flex-start' }}>
         <div>
           <h2>Shared Storage</h2>
-          <p className="page-subtitle">Access, stream, and manage torrent downloads & shared media</p>
+          <p className="page-subtitle">Access, stream, and browse torrent downloads & media files</p>
         </div>
 
         <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setShowNewFolderModal(true)}
-            title="Create new folder"
-          >
-            📁 New Folder
-          </button>
-          
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-          >
-            {isUploading ? 'Uploading...' : '⬆ Upload Files'}
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            multiple
-            style={{ display: 'none' }}
-          />
+          {isOwner && (
+            <>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowNewFolderModal(true)}
+                title="Create new folder (Admin only)"
+              >
+                📁 New Folder
+              </button>
+              
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                title="Upload files to this folder (Admin only)"
+              >
+                {isUploading ? 'Uploading...' : '⬆ Upload Files'}
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                multiple
+                style={{ display: 'none' }}
+              />
 
-          <a
-            href="https://torrent.algosculptor.com"
-            target="_blank"
-            rel="noreferrer"
-            className="btn btn-ghost btn-sm"
-            title="Open qBittorrent web interface"
-          >
-            🧲 Torrent Client
-          </a>
+              <a
+                href="https://torrent.algosculptor.com"
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-ghost btn-sm"
+                title="Open qBittorrent web interface (Admin only)"
+                style={{ borderColor: 'var(--primary-lite)', color: 'var(--primary-lite)' }}
+              >
+                🧲 Torrent Client
+              </a>
+            </>
+          )}
         </div>
       </div>
 
@@ -306,7 +341,7 @@ export default function SharedFiles() {
           <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📂</div>
           <h3 style={{ marginBottom: '0.25rem' }}>No files found</h3>
           <p style={{ color: 'var(--text-2)', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
-            {search ? 'No files match your query.' : 'This folder is empty. Upload files or start a torrent download.'}
+            {search ? 'No files match your query.' : 'This folder is currently empty.'}
           </p>
           {currentPath && (
             <button className="btn btn-ghost btn-sm" onClick={navigateUp}>
@@ -382,14 +417,16 @@ export default function SharedFiles() {
                     >
                       ⬇
                     </a>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ padding: '0.25rem 0.4rem', color: 'var(--error)' }}
-                      onClick={() => handleDelete(item.name)}
-                      title="Delete"
-                    >
-                      ✕
-                    </button>
+                    {isOwner && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ padding: '0.25rem 0.4rem', color: 'var(--error)' }}
+                        onClick={() => handleDelete(item.name)}
+                        title="Delete (Admin only)"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -470,14 +507,16 @@ export default function SharedFiles() {
                         >
                           ⬇
                         </a>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '0.2rem 0.5rem', color: 'var(--error)' }}
-                          onClick={() => handleDelete(item.name)}
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
+                        {isOwner && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '0.2rem 0.5rem', color: 'var(--error)' }}
+                            onClick={() => handleDelete(item.name)}
+                            title="Delete (Admin only)"
+                          >
+                            ✕
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -488,7 +527,7 @@ export default function SharedFiles() {
         </div>
       )}
 
-      {/* New Folder Modal */}
+      {/* New Folder Modal (Admin only) */}
       {showNewFolderModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
