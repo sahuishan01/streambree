@@ -1,14 +1,42 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ApiClient } from '../api/rest';
+import ForceResetModal from './screens/ForceResetModal';
+
+const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const nav = useNavigate();
   const loggedIn = !!localStorage.getItem('sl_token');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mustReset, setMustReset] = useState(false);
+  const api = new ApiClient(SERVER);
+
+  useEffect(() => {
+    if (loggedIn) {
+      void checkMustReset();
+    } else {
+      setMustReset(false);
+    }
+  }, [loggedIn, pathname]);
+
+  async function checkMustReset() {
+    try {
+      const me = await api.me();
+      if (me?.must_change_password) {
+        setMustReset(true);
+      } else {
+        setMustReset(false);
+      }
+    } catch {
+      // ignore auth check error
+    }
+  }
 
   function logout() {
     localStorage.removeItem('sl_token');
+    setMustReset(false);
     nav('/auth');
   }
 
@@ -61,6 +89,14 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </nav>
+      {mustReset && (
+        <ForceResetModal
+          api={api}
+          onSuccess={() => {
+            setMustReset(false);
+          }}
+        />
+      )}
       {children}
     </div>
   );
