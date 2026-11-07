@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ApiClient } from '../../api/rest';
 import { SkeletonLine, SkeletonBlock } from '../Skeleton';
 
@@ -7,13 +7,11 @@ const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 
 export default function Profile() {
   const nav = useNavigate();
-  const [searchParams] = useSearchParams();
   const api = new ApiClient(SERVER);
 
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [isOwner, setIsOwner] = useState(false);
-  const [mustChangePw, setMustChangePw] = useState(false);
   const [loading, setLoading] = useState(true);
   const [nameMsg, setNameMsg] = useState('');
   const [nameMsgType, setNameMsgType] = useState<'success'|'error'>('success');
@@ -33,12 +31,6 @@ export default function Profile() {
     setEmail(me.email);
     setUsername(me.username ?? '');
     setIsOwner(me.is_owner);
-    const forceReset = Boolean(me.must_change_password || searchParams.get('first_login') === '1');
-    setMustChangePw(forceReset);
-    if (forceReset) {
-      setPwMsg('Action required: Please change your temporary password to continue.');
-      setPwMsgType('error');
-    }
     setLoading(false);
   }
 
@@ -58,8 +50,7 @@ export default function Profile() {
     try {
       await api.changePassword(curPw, newPw);
       setCurPw(''); setNewPw('');
-      setMustChangePw(false);
-      setPwMsg('Password updated successfully. You are all set!'); setPwMsgType('success');
+      setPwMsg('Password updated.'); setPwMsgType('success');
     } catch {
       setPwMsg('Incorrect current password.'); setPwMsgType('error');
     }
@@ -109,15 +100,7 @@ export default function Profile() {
       </div>
 
       <div className="card">
-        <div className="card-title">
-          Change password
-          {mustChangePw && <span className="badge badge-owner" style={{ marginLeft: '0.5rem', background: 'var(--red, #e05252)' }}>Required</span>}
-        </div>
-        {mustChangePw && (
-          <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
-            <strong>First login security notice:</strong> You must update your initial password before proceeding.
-          </div>
-        )}
+        <div className="card-title">Change password</div>
         <div className="form">
           <div className="field">
             <label className="field-label">Current password</label>
