@@ -99,22 +99,17 @@ Browser (receiver/viewer)
 ## Build and deploy
 
 ```bash
-# Build frontend (run from repo root)
-podman run --rm \
-  -v ./web:/app -w /app \
-  -e "VITE_SERVER_URL=https://stream.algosculptor.com/api" \
-  docker.io/library/node:20-bookworm-slim \
-  bash -c "npm ci && npm run build"
+# Build + publish the web UI to /srv/streambree/web (backs up the old build, prints rollback)
+./deploy-web.sh stream.algosculptor.com
 
-# Deploy built files
-rm -rf /srv/stream_lover/web/*
-cp -r web/dist/. /srv/stream_lover/web/
-
-# Rebuild + restart signaling server
-podman build -t stream_lover-signaling -f server/deploy/Dockerfile server/
-podman stop stream_lover-signaling && podman rm stream_lover-signaling
-# then re-run with original podman run args (see setup.sh)
+# Rebuild + restart the signaling server (runs natively under systemd on this VPS)
+(cd server && cargo build --release)
+systemctl restart streambree-signaling
 ```
+
+Do not run `setup.sh` on this VPS: it would replace `/etc/caddy/Caddyfile` (which imports
+every site in `/etc/caddy/sites/`) and start a second, podman-based API server. It now
+refuses to run here.
 
 ---
 

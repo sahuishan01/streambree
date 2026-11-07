@@ -10,7 +10,7 @@ day-2 operations.
 
 | Piece | Where it runs | Notes |
 |-------|---------------|-------|
-| Web app (React SPA) | static files in `/srv/stream_lover/web`, served by Caddy | built in a throwaway `node` container |
+| Web app (React SPA) | static files in `/srv/streambree/web`, served by Caddy | built in a throwaway `node` container |
 | Signaling + REST API | podman container `stream_lover-signaling`, bound to `127.0.0.1:8080` | Rust, SQLite on a named volume |
 | STUN/TURN | podman container `coturn`, host networking | survives CGNAT |
 | TLS + routing | Caddy (`/etc/caddy/Caddyfile`) | auto-HTTPS; SPA at `/`, API/WS under `/api/*` |
@@ -110,12 +110,24 @@ podman restart stream_lover-signaling
 sudo systemctl reload caddy
 ```
 
-**Update to a new version** (rebuilds + redeploys; safe to re-run any time)
+**Update to a new version** (rebuilds + redeploys; safe to re-run on a host set up by `setup.sh`)
 ```bash
 cd stream_lover
 git pull
 ./setup.sh stream.example.com
 ```
+
+**Update only the web UI** (any host; touches nothing but the web folder)
+```bash
+git pull
+./deploy-web.sh stream.example.com
+# backs up the current site to /srv/streambree/web.bak-<time> (keeps 3) and prints a rollback command
+```
+
+> `setup.sh` writes `/etc/caddy/Caddyfile` wholesale and runs the API as a podman
+> container, so it refuses to run on a host where Caddy imports other site configs or
+> the `streambree-signaling` systemd service already runs the API. Use `deploy-web.sh`
+> there (or `FORCE_SETUP=1` if you really mean it).
 
 **Back up the database** (accounts, channels, invites live here)
 ```bash
@@ -155,6 +167,7 @@ cert Caddy already obtained and switch the signaling env to `turns:<domain>:5349
 - `deploy-runtime/.env` — generated `JWT_SECRET` + `TURN_SECRET` (**secret**, git-ignored)
 - `deploy-runtime/coturn.conf` — generated coturn config (contains the TURN secret)
 - `/etc/caddy/Caddyfile` — routing + TLS
-- `/srv/stream_lover/web` — published SPA
+- `/srv/streambree/web` — published SPA (override with `WEBROOT=`)
+- `deploy-web.sh` — rebuild + publish only the web UI (keeps rollback backups)
 - podman volume `stream_lover_data` — the SQLite database
 - containers: `stream_lover-signaling`, `coturn`

@@ -13,7 +13,9 @@
 #   ./setup.sh <domain>
 #   DOMAIN=stream.example.com ./setup.sh
 #
-# Re-running is safe: it reuses existing secrets and replaces the containers in place.
+# Re-running is safe on a host set up by this script: it reuses existing secrets and
+# replaces the containers in place. It is meant for a fresh, dedicated host: it writes
+# /etc/caddy/Caddyfile wholesale. To update only the web UI, use ./deploy-web.sh.
 
 set -euo pipefail
 
@@ -21,7 +23,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RUNTIME_DIR="$REPO_DIR/deploy-runtime"
 ENV_FILE="$RUNTIME_DIR/.env"
-WEBROOT="/srv/stream_lover/web"
+WEBROOT="${WEBROOT:-/srv/streambree/web}"
 CADDYFILE="/etc/caddy/Caddyfile"
 SIGNALING_IMAGE="localhost/stream_lover-signaling:latest"
 COTURN_IMAGE="docker.io/coturn/coturn:4.6"
@@ -39,6 +41,20 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 command -v podman >/dev/null || die "podman not found."
 command -v caddy  >/dev/null || die "caddy not found."
 [ -f "$REPO_DIR/server/deploy/Dockerfile" ] || die "Run this from the stream_lover repo root."
+
+# Refuse to run where Streambree is already deployed another way, or where Caddy hosts
+# other sites: this script would overwrite their routing and start a second API server.
+if [ "${FORCE_SETUP:-}" != 1 ]; then
+  conflicts=()
+  systemctl cat streambree-signaling.service >/dev/null 2>&1 \
+    && conflicts+=("systemd service streambree-signaling already runs the API")
+  [ -f "$CADDYFILE" ] && grep -qE '^[[:space:]]*import[[:space:]]' "$CADDYFILE" \
+    && conflicts+=("$CADDYFILE imports other site configs that would be replaced")
+  if [ "${#conflicts[@]}" -gt 0 ]; then
+    for c in "${conflicts[@]}"; do warn "$c"; done
+    die "This host isn't a fresh setup.sh install. Use ./deploy-web.sh <domain> to update the web UI. Set FORCE_SETUP=1 to run anyway."
+  fi
+fi
 
 log "Domain: $DOMAIN"
 mkdir -p "$RUNTIME_DIR"
