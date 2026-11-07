@@ -42,13 +42,16 @@ export class ApiClient {
     else throw new Error('signup failed');
   }
 
-  async login(email: string, password: string): Promise<void> {
+  async login(email: string, password: string): Promise<{ token: string; must_change_password?: boolean }> {
     const res = await this.fetchImpl(`${this.base}/login`, {
       method: 'POST', headers: this.headers(), body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
-    if (res.ok) this.setToken(data.token);
-    else throw new Error('login failed');
+    if (res.ok) {
+      this.setToken(data.token);
+      return data;
+    }
+    throw new Error('login failed');
   }
 
   // --- channels ---
@@ -116,7 +119,7 @@ export class ApiClient {
   async stopStream(id: string): Promise<void> {
     await this.fetchImpl(`${this.base}/channels/${id}/stream/stop`, { method: 'POST', headers: this.headers(false) });
   }
-  async me(): Promise<{ id: string; email: string; username: string; is_owner: boolean } | null> {
+  async me(): Promise<{ id: string; email: string; username: string; is_owner: boolean; must_change_password?: boolean } | null> {
     if (!this.token) return null;
     const res = await this.fetchImpl(`${this.base}/me`, { method: 'GET', headers: this.headers(false) });
     return res.ok ? res.json() : null;

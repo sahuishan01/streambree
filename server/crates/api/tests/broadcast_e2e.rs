@@ -8,13 +8,14 @@ use tokio_tungstenite::tungstenite::Message;
 async fn spawn() -> (std::net::SocketAddr, String, String) {
     let store = Store::connect("sqlite::memory:").await.unwrap();
     store.migrate().await.unwrap();
-    let owner = store.create_user("o@b.com", "h").await.unwrap();
+    let owner = store.create_user("o@b.com", "h", false).await.unwrap();
     let ch = store.create_channel(&owner.id, "C", "CODE12").await.unwrap();
     let jwt = auth::issue_token(b"t", &owner.id, 3600).unwrap();
     let state = AppState {
         store, hub: Hub::new(), jwt_secret: Arc::new(b"t".to_vec()),
         turn_secret: Arc::new("s".into()), turn_url: Arc::new("turns:t:5349".into()),
         stun_url: Arc::new("stun:t:3478".into()), turn_ttl: 600,
+        signups_allowed: true,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

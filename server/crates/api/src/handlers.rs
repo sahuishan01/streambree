@@ -19,6 +19,8 @@ pub struct ChangePasswordRequest {
 #[derive(Serialize)]
 pub struct TokenResponse {
     pub token: String,
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 #[derive(Deserialize)]
@@ -72,7 +74,7 @@ pub async fn signup(
         .map_err(|_| StatusCode::CONFLICT)?;
     let token = auth::issue_token(&state.jwt_secret, &user.id, 86400)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(TokenResponse { token }))
+    Ok(Json(TokenResponse { token, must_change_password: user.must_change_password }))
 }
 
 pub async fn login(
@@ -92,7 +94,7 @@ pub async fn login(
     }
     let token = auth::issue_token(&state.jwt_secret, &user.id, 86400)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(TokenResponse { token }))
+    Ok(Json(TokenResponse { token, must_change_password: user.must_change_password }))
 }
 
 pub async fn register_device(
@@ -143,6 +145,7 @@ pub async fn me(
         "email": user.email,
         "username": user.username,
         "is_owner": user.is_owner,
+        "must_change_password": user.must_change_password,
     })))
 }
 

@@ -40,6 +40,9 @@ export default function Layout({ children }: { children: ReactNode }) {
                 Join
               </Link>
             )}
+            <a href="/shared/" onClick={closeMenu} className="nav-link">
+              Shared Files
+            </a>
           </div>
           <button className="nav-hamburger" onClick={() => setMenuOpen((o) => !o)} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>
             {menuOpen ? '✕' : '☰'}

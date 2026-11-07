@@ -150,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn create_channel_enrolls_owner_as_member() {
         let store = fresh().await;
-        let user = store.create_user("a@b.com", "h").await.unwrap();
+        let user = store.create_user("a@b.com", "h", false).await.unwrap();
         let ch = store.create_channel(&user.id, "Movie Night", "ABC123").await.unwrap();
         let role = store.member_role(&ch.id, &user.id).await.unwrap();
         assert_eq!(role.as_deref(), Some("owner"));
@@ -162,8 +162,8 @@ mod tests {
     #[tokio::test]
     async fn add_member_and_list_roster() {
         let store = fresh().await;
-        let owner = store.create_user("o@b.com", "h").await.unwrap();
-        let guest = store.create_user("g@b.com", "h").await.unwrap();
+        let owner = store.create_user("o@b.com", "h", false).await.unwrap();
+        let guest = store.create_user("g@b.com", "h", false).await.unwrap();
         let ch = store.create_channel(&owner.id, "Room", "CODE12").await.unwrap();
         store.add_member(&ch.id, &guest.id, "member").await.unwrap();
         let roster = store.members(&ch.id).await.unwrap();
@@ -174,8 +174,8 @@ mod tests {
     #[tokio::test]
     async fn set_role_streaming_and_remove_member() {
         let store = fresh().await;
-        let owner = store.create_user("o@b.com", "h").await.unwrap();
-        let guest = store.create_user("g@b.com", "h").await.unwrap();
+        let owner = store.create_user("o@b.com", "h", false).await.unwrap();
+        let guest = store.create_user("g@b.com", "h", false).await.unwrap();
         let ch = store.create_channel(&owner.id, "Room", "CODE12").await.unwrap();
         store.add_member(&ch.id, &guest.id, "member").await.unwrap();
         store.set_member_role(&ch.id, &guest.id, "admin").await.unwrap();
@@ -189,7 +189,7 @@ mod tests {
     #[tokio::test]
     async fn create_lookup_and_revoke_invite() {
         let store = fresh().await;
-        let owner = store.create_user("o@b.com", "h").await.unwrap();
+        let owner = store.create_user("o@b.com", "h", false).await.unwrap();
         let ch = store.create_channel(&owner.id, "Room", "CODE12").await.unwrap();
         let inv = store.create_invite(&ch.id, &owner.id, "INV777", None).await.unwrap();
         assert_eq!(inv.code, "INV777");
@@ -202,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn user_lookup_by_email_supports_add_by_email() {
         let store = fresh().await;
-        let target = store.create_user("t@b.com", "h").await.unwrap();
+        let target = store.create_user("t@b.com", "h", false).await.unwrap();
         let found = store.user_by_email("t@b.com").await.unwrap().unwrap();
         assert_eq!(found.id, target.id);
     }

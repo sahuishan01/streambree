@@ -1,0 +1,18 @@
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=UTC
+      - WEBUI_PORT=8085
+      - TORRENTING_PORT=6881
+    volumes:
+      - /srv/streambree/qbittorrent/config:/config
+      - /srv/streambree/shared:/downloads
+    ports:
+      - 127.0.0.1:8085:8085
+      - 6881:6881
+      - 6881:6881/udp

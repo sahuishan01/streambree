@@ -18,9 +18,14 @@ export default function Auth() {
   async function run() {
     setMsg(''); setLoading(true);
     try {
-      await api.login(email, password);
-      toast('success', 'Signed in');
-      navigate('/channels');
+      const res = await api.login(email, password);
+      if (res.must_change_password) {
+        toast('info', 'Please set a new password before continuing');
+        navigate('/profile?first_login=1');
+      } else {
+        toast('success', 'Signed in');
+        navigate('/channels');
+      }
     } catch {
       setMsg('Incorrect email or password.');
     } finally {

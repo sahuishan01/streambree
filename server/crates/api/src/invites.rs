@@ -195,6 +195,7 @@ mod tests {
             turn_url: Arc::new("turns:t:5349".into()),
             stun_url: Arc::new("stun:t:3478".into()),
             turn_ttl: 600,
+            signups_allowed: true,
         }
     }
     async fn token(app: &axum::Router, email: &str) -> String {

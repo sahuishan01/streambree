@@ -23,6 +23,7 @@ pub struct User {
     pub created_at: String,
     pub is_owner: bool,
     pub username: String,
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -68,14 +69,16 @@ impl Store {
             created_at: Utc::now().to_rfc3339(),
             is_owner,
             username: String::new(),
+            must_change_password: true,
         };
-        sqlx::query("INSERT INTO users (id, email, password_hash, created_at, is_owner, username) VALUES (?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (id, email, password_hash, created_at, is_owner, username, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)")
             .bind(&user.id)
             .bind(&user.email)
             .bind(&user.password_hash)
             .bind(&user.created_at)
             .bind(user.is_owner)
             .bind(&user.username)
+            .bind(user.must_change_password)
             .execute(&self.pool)
             .await?;
         Ok(user)
@@ -140,7 +143,7 @@ impl Store {
     }
 
     pub async fn update_password(&self, user_id: &str, new_hash: &str) -> Result<(), StoreError> {
-        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+        sqlx::query("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?")
             .bind(new_hash)
             .bind(user_id)
             .execute(&self.pool)
@@ -198,7 +201,7 @@ mod tests {
     async fn duplicate_email_is_rejected() {
         let store = fresh().await;
         store.create_user("a@b.com", "h", false).await.unwrap();
-        assert!(store.create_user("a@b.com", "h2").await.is_err());
+        assert!(store.create_user("a@b.com", "h2", false).await.is_err());
     }
 
     #[tokio::test]

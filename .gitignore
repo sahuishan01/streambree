@@ -6,3 +6,4 @@
 .env
 /deploy-runtime
 /web/dist
+shared
