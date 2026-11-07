@@ -1,6 +1,12 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiClient } from '../../api/rest';
 import { useToast } from '../toast';
+import { EmptyState, Modal, PageHead } from '../components/ui';
+import { themeMode, type ThemeId } from '../components/theme';
+import {
+  ArchiveIcon, ArrowUpIcon, CloseIcon, DocIcon, DownloadIcon, FileIcon, FilmIcon, FolderIcon,
+  FolderPlusIcon, GridIcon, ImageIcon, ListIcon, MagnetIcon, MusicIcon, SearchIcon, TrashIcon, UploadIcon,
+} from '../components/icons';
 
 interface FileEntry {
   name: string;
@@ -10,54 +16,69 @@ interface FileEntry {
   extension: string;
 }
 
+type ViewMode = 'grid' | 'table';
+type FileKind = 'folder' | 'audio' | 'video' | 'image' | 'doc' | 'archive' | 'other';
+type Preview = { url: string; type: 'video' | 'audio' | 'image'; name: string };
+
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
+const VIEW_KEY = 'sl_files_view';
+
+const sizeFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const dateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${sizeFmt.format(bytes / Math.pow(1024, i))} ${units[i]}`;
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return iso ? dateFmt.format(new Date(iso)) : '—';
 }
 
-function getIcon(isDir: boolean, ext: string): { icon: string; bg: string; color: string } {
-  if (isDir) return { icon: '📁', bg: 'rgba(234, 179, 8, 0.15)', color: '#eab308' };
-  
-  if (['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a', 'aac'].includes(ext)) {
-    return { icon: '🎵', bg: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' };
-  }
-  if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) {
-    return { icon: '🎬', bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171' };
-  }
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext)) {
-    return { icon: '🖼️', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' };
-  }
-  if (['pdf', 'txt', 'md', 'json', 'yaml', 'yml', 'rs', 'ts', 'js'].includes(ext)) {
-    return { icon: '📄', bg: 'rgba(34, 197, 94, 0.15)', color: '#4ade80' };
-  }
-  if (['zip', 'tar', 'gz', '7z', 'rar', 'torrent'].includes(ext)) {
-    return { icon: '📦', bg: 'rgba(249, 115, 22, 0.15)', color: '#fb923c' };
-  }
-  return { icon: '📎', bg: 'rgba(161, 161, 170, 0.15)', color: '#a1a1aa' };
+function kindOf(item: FileEntry): FileKind {
+  if (item.is_dir) return 'folder';
+  const ext = item.extension;
+  if (['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a', 'aac'].includes(ext)) return 'audio';
+  if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) return 'video';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext)) return 'image';
+  if (['pdf', 'txt', 'md', 'json', 'yaml', 'yml', 'rs', 'ts', 'js'].includes(ext)) return 'doc';
+  if (['zip', 'tar', 'gz', '7z', 'rar', 'torrent'].includes(ext)) return 'archive';
+  return 'other';
+}
+
+const KIND_ICON: Record<FileKind, ReactNode> = {
+  folder: <FolderIcon />, audio: <MusicIcon />, video: <FilmIcon />, image: <ImageIcon />,
+  doc: <DocIcon />, archive: <ArchiveIcon />, other: <FileIcon />,
+};
+
+function FileGlyph({ item }: { item: FileEntry }) {
+  const kind = kindOf(item);
+  return <span className="file-icon" data-kind={kind} aria-hidden="true">{KIND_ICON[kind]}</span>;
+}
+
+function readView(): ViewMode {
+  try { return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'table'; } catch { return 'table'; }
+}
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = localStorage.getItem('sl_token');
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
 }
 
 export default function SharedFiles() {
   const [currentPath, setCurrentPath] = useState('');
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [viewMode, setViewModeState] = useState<ViewMode>(readView);
   const [isUploading, setIsUploading] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
-  const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'video' | 'audio' | 'image' | 'text'; name: string } | null>(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -66,7 +87,20 @@ export default function SharedFiles() {
   useEffect(() => {
     void checkOwner();
     void loadFiles(currentPath);
+    setSearch('');
   }, [currentPath]);
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreview(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [preview]);
+
+  function setViewMode(mode: ViewMode) {
+    setViewModeState(mode);
+    try { localStorage.setItem(VIEW_KEY, mode); } catch { /* preference only */ }
+  }
 
   async function checkOwner() {
     try {
@@ -79,22 +113,24 @@ export default function SharedFiles() {
 
   async function loadFiles(path = currentPath) {
     setLoading(true);
+    setLoadError(false);
     try {
       const q = path ? `?path=${encodeURIComponent(path)}` : '';
       const res = await fetch(`${SERVER}/shared-files${q}`);
       if (!res.ok) throw new Error('Failed to load files');
       const data: FileEntry[] = await res.json();
+      data.sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name));
       setFiles(data);
     } catch {
-      toast('error', 'Could not load files from server');
+      setFiles([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   }
 
   function navigateTo(folder: string) {
-    const next = currentPath ? `${currentPath}/${folder}` : folder;
-    setCurrentPath(next);
+    setCurrentPath(currentPath ? `${currentPath}/${folder}` : folder);
   }
 
   function navigateUp() {
@@ -110,31 +146,21 @@ export default function SharedFiles() {
     const uploadFiles = e.target.files;
     if (!uploadFiles || uploadFiles.length === 0) return;
 
-    const token = localStorage.getItem('sl_token');
     const form = new FormData();
-    for (let i = 0; i < uploadFiles.length; i++) {
-      form.append('files', uploadFiles[i]);
-    }
+    for (let i = 0; i < uploadFiles.length; i++) form.append('files', uploadFiles[i]);
 
     setIsUploading(true);
     try {
       const q = currentPath ? `?path=${encodeURIComponent(currentPath)}` : '';
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${SERVER}/shared-files${q}`, {
-        method: 'POST',
-        headers,
-        body: form,
-      });
+      const res = await fetch(`${SERVER}/shared-files${q}`, { method: 'POST', headers: authHeaders(), body: form });
       if (!res.ok) {
-        if (res.status === 403) throw new Error('Admin authorization required to upload');
-        throw new Error('Upload failed');
+        if (res.status === 403) throw new Error('Only the owner can upload files.');
+        throw new Error('Upload failed.');
       }
-      toast('success', `Uploaded ${uploadFiles.length} file(s)`);
+      toast('success', uploadFiles.length === 1 ? `Uploaded “${uploadFiles[0].name}”` : `Uploaded ${uploadFiles.length} files`);
       void loadFiles(currentPath);
-    } catch (err: any) {
-      toast('error', err.message || 'File upload failed');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Upload failed.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -143,52 +169,44 @@ export default function SharedFiles() {
 
   async function handleCreateFolder(e: React.FormEvent) {
     e.preventDefault();
-    if (!newFolderName.trim()) return;
-
-    const token = localStorage.getItem('sl_token');
+    const name = newFolderName.trim();
+    if (!name) return;
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       const res = await fetch(`${SERVER}/shared-files/mkdir`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ path: currentPath || undefined, name: newFolderName.trim() }),
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ path: currentPath || undefined, name }),
       });
       if (!res.ok) {
-        if (res.status === 403) throw new Error('Admin authorization required');
-        if (res.status === 409) throw new Error('Folder already exists');
-        throw new Error('Create folder failed');
+        if (res.status === 403) throw new Error('Only the owner can create folders.');
+        if (res.status === 409) throw new Error(`A folder named “${name}” already exists here.`);
+        throw new Error('Could not create the folder.');
       }
-      toast('success', `Created folder "${newFolderName.trim()}"`);
+      toast('success', `Created folder “${name}”`);
       setNewFolderName('');
-      setShowNewFolderModal(false);
+      setShowNewFolder(false);
       void loadFiles(currentPath);
-    } catch (err: any) {
-      toast('error', err.message || 'Failed to create folder');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not create the folder.');
     }
   }
 
-  async function handleDelete(name: string) {
-    if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
-    const targetPath = currentPath ? `${currentPath}/${name}` : name;
-    const token = localStorage.getItem('sl_token');
+  async function handleDelete(item: FileEntry) {
+    const what = item.is_dir ? `the folder “${item.name}” and everything in it` : `“${item.name}”`;
+    if (!confirm(`Delete ${what}? This cannot be undone.`)) return;
+    const targetPath = currentPath ? `${currentPath}/${item.name}` : item.name;
     try {
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       const res = await fetch(`${SERVER}/shared-files?path=${encodeURIComponent(targetPath)}`, {
-        method: 'DELETE',
-        headers,
+        method: 'DELETE', headers: authHeaders(),
       });
       if (!res.ok) {
-        if (res.status === 403) throw new Error('Admin authorization required');
-        throw new Error('Delete failed');
+        if (res.status === 403) throw new Error('Only the owner can delete files.');
+        throw new Error('Delete failed.');
       }
-      toast('success', `Deleted "${name}"`);
+      toast('success', `Deleted “${item.name}”`);
       void loadFiles(currentPath);
-    } catch (err: any) {
-      toast('error', err.message || 'Could not delete item');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not delete the item.');
     }
   }
 
@@ -197,413 +215,218 @@ export default function SharedFiles() {
     return `/raw-shared/${encodeURIComponent(rel).replace(/%2F/g, '/')}`;
   }
 
-  function handleItemClick(item: FileEntry) {
-    if (item.is_dir) {
-      navigateTo(item.name);
-      return;
-    }
-
+  function openItem(item: FileEntry) {
+    if (item.is_dir) { navigateTo(item.name); return; }
     const ext = item.extension;
     const url = getDownloadUrl(item);
-
-    if (['mp4', 'webm', 'mov'].includes(ext)) {
-      setPreviewMedia({ url, type: 'video', name: item.name });
-    } else if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) {
-      setPreviewMedia({ url, type: 'audio', name: item.name });
-    } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
-      setPreviewMedia({ url, type: 'image', name: item.name });
-    } else {
-      window.open(url, '_blank');
-    }
+    if (['mp4', 'webm', 'mov'].includes(ext)) setPreview({ url, type: 'video', name: item.name });
+    else if (['mp3', 'wav', 'ogg', 'flac'].includes(ext)) setPreview({ url, type: 'audio', name: item.name });
+    else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) setPreview({ url, type: 'image', name: item.name });
+    else window.open(url, '_blank', 'noopener');
   }
 
-  const filtered = files.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()));
+  const query = search.trim().toLowerCase();
+  const filtered = query ? files.filter((f) => f.name.toLowerCase().includes(query)) : files;
+  const folderLabel = breadcrumbs[breadcrumbs.length - 1] ?? 'Shared';
+
+  function itemActions(item: FileEntry) {
+    return (
+      <>
+        {!item.is_dir && (
+          <a href={getDownloadUrl(item)} download className="btn btn-quiet btn-icon"
+            aria-label={`Download ${item.name}`} title="Download">
+            <DownloadIcon />
+          </a>
+        )}
+        {isOwner && (
+          <button type="button" className="btn btn-quiet btn-icon" onClick={() => handleDelete(item)}
+            aria-label={`Delete ${item.name}`} title="Delete" style={{ color: 'var(--danger)' }}>
+            <TrashIcon />
+          </button>
+        )}
+      </>
+    );
+  }
+
+  let content: ReactNode;
+  if (loading) {
+    content = <div className="loading"><div className="spinner" aria-hidden="true" /> Loading files…</div>;
+  } else if (loadError) {
+    content = (
+      <div className="panel">
+        <EmptyState title="Couldn’t load this folder" desc="The file server didn’t respond. Check your connection and try again."
+          action={<button type="button" className="btn btn-secondary" onClick={() => loadFiles(currentPath)}>Try again</button>} />
+      </div>
+    );
+  } else if (filtered.length === 0) {
+    content = (
+      <div className="panel">
+        <EmptyState icon={query ? <SearchIcon /> : <FolderIcon />}
+          title={query ? `Nothing matches “${search.trim()}”` : 'This folder is empty'}
+          desc={query ? 'Try a shorter name, or clear the search.' : isOwner ? 'Upload files or create a folder to fill it.' : 'Nothing has been shared here yet.'}
+          action={query
+            ? <button type="button" className="btn btn-secondary" onClick={() => setSearch('')}>Clear search</button>
+            : currentPath ? <button type="button" className="btn btn-secondary" onClick={navigateUp}>Back to parent folder</button> : undefined} />
+      </div>
+    );
+  } else if (viewMode === 'grid') {
+    content = (
+      <ul className="file-grid" aria-label={`Contents of ${folderLabel}`}>
+        {filtered.map((item) => (
+          <li key={item.name} className="file-tile">
+            <button type="button" className="file-open" onClick={() => openItem(item)}
+              aria-label={item.is_dir ? `Open folder ${item.name}` : `Open ${item.name}`}>
+              <FileGlyph item={item} />
+              <span className="file-name" title={item.name}>{item.name}</span>
+              <span className="file-meta">
+                <span>{item.is_dir ? 'Folder' : formatSize(item.size)}</span>
+                <span>{formatDate(item.modified)}</span>
+              </span>
+            </button>
+            <div className="file-tile-actions">{itemActions(item)}</div>
+          </li>
+        ))}
+      </ul>
+    );
+  } else {
+    content = (
+      <div className="panel panel-flush">
+        <table className="table">
+          <caption className="visually-hidden">Contents of {folderLabel}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col" style={{ width: 110 }}>Size</th>
+              <th scope="col" className="hide-sm" style={{ width: 170 }}>Modified</th>
+              <th scope="col" style={{ width: 96 }}><span className="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((item) => (
+              <tr key={item.name}>
+                <td>
+                  <button type="button" className="row-open" onClick={() => openItem(item)} title={item.name}>
+                    <FileGlyph item={item} />
+                    <span className="truncate" style={{ fontWeight: item.is_dir ? 600 : 400 }}>{item.name}</span>
+                  </button>
+                </td>
+                <td className="num">{item.is_dir ? '—' : formatSize(item.size)}</td>
+                <td className="num hide-sm">{formatDate(item.modified)}</td>
+                <td className="actions">{itemActions(item)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
-    <div className="page" style={{ maxWidth: 1100 }}>
-      {/* Header bar */}
-      <div className="row-spread page-header" style={{ alignItems: 'flex-start' }}>
-        <div>
-          <h2>Shared Storage</h2>
-          <p className="page-subtitle">Access, stream, and browse torrent downloads & media files</p>
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
-          {isOwner && (
-            <>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => setShowNewFolderModal(true)}
-                title="Create new folder (Admin only)"
-              >
-                📁 New Folder
-              </button>
-              
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                title="Upload files to this folder (Admin only)"
-              >
-                {isUploading ? 'Uploading...' : '⬆ Upload Files'}
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                multiple
-                style={{ display: 'none' }}
-              />
-
-              <a
-                href="https://torrent.algosculptor.com"
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-ghost btn-sm"
-                title="Open qBittorrent web interface (Admin only)"
-                style={{ borderColor: 'var(--primary-lite)', color: 'var(--primary-lite)' }}
-              >
-                🧲 Torrent Client
-              </a>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Navigation Toolbar */}
-      <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-          {/* Breadcrumbs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.875rem' }}>
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '0.25rem 0.5rem', fontWeight: 600 }}
-              onClick={() => setCurrentPath('')}
-            >
-              Root
+    <div className="page">
+      <PageHead
+        title="Files"
+        desc="Shared media and downloads on this server. Open audio, video and images right here."
+        actions={isOwner && (
+          <>
+            <a href="https://torrent.algosculptor.com" target="_blank" rel="noreferrer" className="btn btn-quiet btn-sm">
+              <MagnetIcon /> Torrent client
+            </a>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowNewFolder(true)}>
+              <FolderPlusIcon /> New folder
             </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+              <UploadIcon /> {isUploading ? 'Uploading…' : 'Upload'}
+            </button>
+            <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple hidden />
+          </>
+        )}
+      />
+
+      <div className="toolbar">
+        <nav aria-label="Folder path" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', minWidth: 0 }}>
+          {currentPath && (
+            <button type="button" className="btn btn-quiet btn-icon" onClick={navigateUp} aria-label="Up one folder" title="Up one folder">
+              <ArrowUpIcon />
+            </button>
+          )}
+          <ol className="crumbs">
+            <li>
+              <button type="button" className="crumb" onClick={() => setCurrentPath('')}
+                aria-current={breadcrumbs.length === 0 ? 'page' : undefined}>Shared</button>
+            </li>
             {breadcrumbs.map((crumb, idx) => {
               const full = breadcrumbs.slice(0, idx + 1).join('/');
+              const isLast = idx === breadcrumbs.length - 1;
               return (
-                <span key={full} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                  <span style={{ color: 'var(--text-3)' }}>/</span>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: '0.25rem 0.5rem' }}
-                    onClick={() => setCurrentPath(full)}
-                  >
-                    {crumb}
-                  </button>
-                </span>
+                <li key={full}>
+                  <button type="button" className="crumb" onClick={() => setCurrentPath(full)}
+                    aria-current={isLast ? 'page' : undefined} title={crumb}>{crumb}</button>
+                </li>
               );
             })}
-          </div>
+          </ol>
+        </nav>
 
-          {/* Search & View Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input
-              type="text"
-              className="input"
-              style={{ padding: '0.35rem 0.75rem', fontSize: '0.8125rem', width: 180 }}
-              placeholder="Search in folder..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', padding: 2 }}>
-              <button
-                className={`btn btn-ghost btn-sm ${viewMode === 'grid' ? 'active' : ''}`}
-                style={{ padding: '0.25rem 0.5rem' }}
-                onClick={() => setViewMode('grid')}
-                title="Grid view"
-              >
-                ⊞
-              </button>
-              <button
-                className={`btn btn-ghost btn-sm ${viewMode === 'table' ? 'active' : ''}`}
-                style={{ padding: '0.25rem 0.5rem' }}
-                onClick={() => setViewMode('table')}
-                title="List view"
-              >
-                ≡
-              </button>
-            </div>
+        <div className="toolbar-right">
+          <div className="search">
+            <SearchIcon />
+            <label className="visually-hidden" htmlFor="file-search">Search this folder</label>
+            <input id="file-search" type="search" className="input input-sm" placeholder="Search this folder"
+              value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <div className="seg" role="group" aria-label="View">
+            <button type="button" aria-pressed={viewMode === 'table'} onClick={() => setViewMode('table')} aria-label="List view" title="List view">
+              <ListIcon />
+            </button>
+            <button type="button" aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view">
+              <GridIcon />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Main File Content Area */}
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-3)' }}>
-          Loading shared files...
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📂</div>
-          <h3 style={{ marginBottom: '0.25rem' }}>No files found</h3>
-          <p style={{ color: 'var(--text-2)', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
-            {search ? 'No files match your query.' : 'This folder is currently empty.'}
-          </p>
-          {currentPath && (
-            <button className="btn btn-ghost btn-sm" onClick={navigateUp}>
-              ← Back to parent folder
-            </button>
-          )}
-        </div>
-      ) : viewMode === 'grid' ? (
-        /* Grid View */
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
-          gap: '1rem'
-        }}>
-          {currentPath && (
-            <div
-              className="card"
-              style={{
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.875rem',
-                borderStyle: 'dashed',
-              }}
-              onClick={navigateUp}
-            >
-              <div style={{ fontSize: '1.5rem' }}>⬆</div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>..</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Parent folder</div>
-              </div>
+      {content}
+
+      {showNewFolder && (
+        <Modal title="New folder" desc={`Created inside “${folderLabel}”.`} onClose={() => setShowNewFolder(false)}>
+          <form onSubmit={handleCreateFolder} className="stack">
+            <div className="field">
+              <label className="label" htmlFor="folder-name">Folder name</label>
+              <input id="folder-name" type="text" className="input" value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)} autoFocus required autoComplete="off" />
             </div>
-          )}
-
-          {filtered.map((item) => {
-            const meta = getIcon(item.is_dir, item.extension);
-            return (
-              <div
-                key={item.name}
-                className="card"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  padding: '1rem',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  transition: 'transform 0.15s, border-color 0.15s',
-                }}
-                onClick={() => handleItemClick(item)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                  <div style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 'var(--r)',
-                    background: meta.bg,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1.35rem'
-                  }}>
-                    {meta.icon}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.25rem' }} onClick={(e) => e.stopPropagation()}>
-                    <a
-                      href={getDownloadUrl(item)}
-                      download={!item.is_dir}
-                      className="btn btn-ghost btn-sm"
-                      style={{ padding: '0.25rem 0.4rem', color: 'var(--text-3)' }}
-                      title="Download"
-                    >
-                      ⬇
-                    </a>
-                    {isOwner && (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ padding: '0.25rem 0.4rem', color: 'var(--error)' }}
-                        onClick={() => handleDelete(item.name)}
-                        title="Delete (Admin only)"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div style={{
-                  fontWeight: 600,
-                  fontSize: '0.875rem',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  marginBottom: '0.25rem'
-                }} title={item.name}>
-                  {item.name}
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 'auto' }}>
-                  <span>{item.is_dir ? 'Folder' : formatSize(item.size)}</span>
-                  <span>{formatDate(item.modified)}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        /* Table View */
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-2)', background: 'var(--surface-2)' }}>
-                <th style={{ padding: '0.75rem 1rem' }}>Name</th>
-                <th style={{ padding: '0.75rem 1rem', width: 120 }}>Size</th>
-                <th style={{ padding: '0.75rem 1rem', width: 160 }}>Last Modified</th>
-                <th style={{ padding: '0.75rem 1rem', width: 100, textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentPath && (
-                <tr
-                  style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
-                  onClick={navigateUp}
-                >
-                  <td style={{ padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
-                    <span>⬆</span> .. (Parent directory)
-                  </td>
-                  <td style={{ padding: '0.75rem 1rem', color: 'var(--text-3)' }}>—</td>
-                  <td style={{ padding: '0.75rem 1rem', color: 'var(--text-3)' }}>—</td>
-                  <td style={{ padding: '0.75rem 1rem' }}></td>
-                </tr>
-              )}
-
-              {filtered.map((item) => {
-                const meta = getIcon(item.is_dir, item.extension);
-                return (
-                  <tr
-                    key={item.name}
-                    style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
-                    onClick={() => handleItemClick(item)}
-                  >
-                    <td style={{ padding: '0.75rem 1rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-                        <span style={{ fontSize: '1.125rem' }}>{meta.icon}</span>
-                        <span style={{ fontWeight: item.is_dir ? 600 : 400 }}>{item.name}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem', color: 'var(--text-3)' }}>
-                      {item.is_dir ? '—' : formatSize(item.size)}
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem', color: 'var(--text-3)' }}>
-                      {formatDate(item.modified)}
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'inline-flex', gap: '0.375rem' }}>
-                        <a
-                          href={getDownloadUrl(item)}
-                          download={!item.is_dir}
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '0.2rem 0.5rem' }}
-                          title="Download"
-                        >
-                          ⬇
-                        </a>
-                        {isOwner && (
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            style={{ padding: '0.2rem 0.5rem', color: 'var(--error)' }}
-                            onClick={() => handleDelete(item.name)}
-                            title="Delete (Admin only)"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-quiet" onClick={() => setShowNewFolder(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={!newFolderName.trim()}>Create folder</button>
+            </div>
+          </form>
+        </Modal>
       )}
 
-      {/* New Folder Modal (Admin only) */}
-      {showNewFolderModal && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', zIndex: 1000, padding: '1rem'
-        }}>
-          <div className="card" style={{ maxWidth: 400, width: '100%' }}>
-            <div className="card-title" style={{ marginBottom: '0.5rem' }}>Create New Folder</div>
-            <form onSubmit={handleCreateFolder}>
-              <div className="field">
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="Folder name"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setShowNewFolderModal(false)}
-                >
-                  Cancel
+      {preview && (
+        // The lightbox is always dark so media reads well; light themes borrow the default dark palette.
+        <div className="preview" role="dialog" aria-modal="true"
+          data-theme={themeMode((document.documentElement.dataset.theme ?? 'breeze') as ThemeId) === 'light' ? 'breeze' : undefined} aria-label={`Preview of ${preview.name}`}
+          onClick={() => setPreview(null)}>
+          <div className="preview-inner" onClick={(e) => e.stopPropagation()}>
+            <div className="preview-head">
+              <h2 className="truncate">{preview.name}</h2>
+              <div className="cluster" style={{ flexWrap: 'nowrap' }}>
+                <a href={preview.url} download className="btn btn-secondary btn-sm"><DownloadIcon /> Download</a>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setPreview(null)} autoFocus>
+                  <CloseIcon /> Close
                 </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={!newFolderName.trim()}
-                >
-                  Create
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Media Preview Modal */}
-      {previewMedia && (
-        <div
-          style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.92)', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1.5rem'
-          }}
-          onClick={() => setPreviewMedia(null)}
-        >
-          <div
-            style={{ maxWidth: 900, width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', color: '#fff' }}>
-              <h3 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewMedia.name}</h3>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <a href={previewMedia.url} download className="btn btn-primary btn-sm">Download</a>
-                <button className="btn btn-ghost btn-sm" onClick={() => setPreviewMedia(null)}>✕ Close</button>
               </div>
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#000', borderRadius: 'var(--r)', overflow: 'hidden' }}>
-              {previewMedia.type === 'video' && (
-                <video src={previewMedia.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '75vh' }} />
-              )}
-              {previewMedia.type === 'audio' && (
-                <div style={{ padding: '3rem', width: '100%', textAlign: 'center' }}>
-                  <div style={{ fontSize: '4rem', marginBottom: '1.5rem' }}>🎵</div>
-                  <audio src={previewMedia.url} controls autoPlay style={{ width: '100%' }} />
+            <div className="preview-body">
+              {preview.type === 'video' && <video src={preview.url} controls autoPlay />}
+              {preview.type === 'audio' && (
+                <div className="preview-audio">
+                  <span className="file-icon" data-kind="audio" style={{ width: 64, height: 64 }} aria-hidden="true"><MusicIcon /></span>
+                  <audio src={preview.url} controls autoPlay />
                 </div>
               )}
-              {previewMedia.type === 'image' && (
-                <img src={previewMedia.url} alt={previewMedia.name} style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }} />
-              )}
+              {preview.type === 'image' && <img src={preview.url} alt={preview.name} />}
             </div>
           </div>
         </div>

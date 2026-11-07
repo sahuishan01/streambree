@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { ApiClient } from '../../api/rest';
+import { Modal, Notice } from '../components/ui';
 
 interface Props {
   api: ApiClient;
   onSuccess: () => void;
 }
+
+const PW_MIN = 8;
 
 export default function ForceResetModal({ api, onSuccess }: Props) {
   const [curPw, setCurPw] = useState('');
@@ -12,121 +15,58 @@ export default function ForceResetModal({ api, onSuccess }: Props) {
   const [confirmPw, setConfirmPw] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const mismatch = confirmPw.length > 0 && newPw !== confirmPw;
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
     setErr('');
-    if (!curPw) {
-      setErr('Current password is required.');
-      return;
-    }
-    if (newPw.length < 8) {
-      setErr('New password must be at least 8 characters long.');
-      return;
-    }
-    if (newPw !== confirmPw) {
-      setErr('New passwords do not match.');
-      return;
-    }
-    if (newPw === curPw) {
-      setErr('New password must be different from current password.');
-      return;
-    }
+    if (!curPw) { setErr('Enter your current (temporary) password.'); return; }
+    if (newPw.length < PW_MIN) { setErr(`New password needs at least ${PW_MIN} characters.`); return; }
+    if (newPw !== confirmPw) { setErr('The new passwords don’t match.'); return; }
+    if (newPw === curPw) { setErr('Choose a password different from the temporary one.'); return; }
 
     setLoading(true);
     try {
       await api.changePassword(curPw, newPw);
       onSuccess();
     } catch {
-      setErr('Incorrect current password.');
+      setErr('Your current password is incorrect.');
     } finally {
       setLoading(false);
     }
   }
 
+  // No onClose: the reset is required before using the app.
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.85)',
-      backdropFilter: 'blur(6px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999,
-      padding: '1rem',
-    }}>
-      <div className="card" style={{ maxWidth: 440, width: '100%', boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '1rem' }}>
-          <div style={{
-            width: 40,
-            height: 40,
-            borderRadius: '50%',
-            background: 'rgba(239, 68, 68, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '1.25rem'
-          }}>🔒</div>
-          <div>
-            <div className="card-title" style={{ margin: 0 }}>Password Reset Required</div>
-            <div style={{ fontSize: '0.8125rem', color: 'var(--text-2)' }}>
-              For security, please change your temporary password before accessing the platform.
-            </div>
-          </div>
+    <Modal title="Set a new password"
+      desc="You signed in with a temporary password. Choose your own to continue.">
+      <form onSubmit={handleReset} className="stack" noValidate>
+        <div className="field">
+          <label className="label" htmlFor="reset-cur">Temporary password</label>
+          <input id="reset-cur" className="input" type="password" value={curPw} autoComplete="current-password"
+            onChange={(e) => setCurPw(e.target.value)} required />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="reset-new">New password</label>
+          <input id="reset-new" className="input" type="password" value={newPw} autoComplete="new-password"
+            aria-describedby="reset-new-hint" onChange={(e) => setNewPw(e.target.value)} required />
+          <p id="reset-new-hint" className="hint">At least {PW_MIN} characters.</p>
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="reset-confirm">Confirm new password</label>
+          <input id="reset-confirm" className="input" type="password" value={confirmPw} autoComplete="new-password"
+            aria-invalid={mismatch || undefined} aria-describedby={mismatch ? 'reset-confirm-err' : undefined}
+            onChange={(e) => setConfirmPw(e.target.value)} required />
+          {mismatch && <p id="reset-confirm-err" className="hint hint-error">Doesn’t match the new password.</p>}
         </div>
 
-        {err && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{err}</div>}
+        {err && <Notice tone="error">{err}</Notice>}
 
-        <form onSubmit={handleReset} className="form">
-          <div className="field">
-            <label className="field-label">Current password</label>
-            <input
-              className="input"
-              type="password"
-              value={curPw}
-              onChange={(e) => setCurPw(e.target.value)}
-              placeholder="Enter current password"
-              autoFocus
-              required
-            />
-          </div>
-          <div className="field">
-            <label className="field-label">New password</label>
-            <input
-              className="input"
-              type="password"
-              value={newPw}
-              onChange={(e) => setNewPw(e.target.value)}
-              placeholder="Min 8 characters"
-              required
-            />
-          </div>
-          <div className="field">
-            <label className="field-label">Confirm new password</label>
-            <input
-              className="input"
-              type="password"
-              value={confirmPw}
-              onChange={(e) => setConfirmPw(e.target.value)}
-              placeholder="Re-enter new password"
-              required
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="btn btn-primary"
-            style={{ width: '100%', marginTop: '0.5rem' }}
-            disabled={loading || !curPw || newPw.length < 8 || newPw !== confirmPw}
-          >
-            {loading ? 'Updating password...' : 'Update password & continue'}
-          </button>
-        </form>
-      </div>
-    </div>
+        <button type="submit" className="btn btn-primary btn-lg btn-block"
+          disabled={loading || !curPw || newPw.length < PW_MIN || newPw !== confirmPw}>
+          {loading ? 'Saving…' : 'Save and continue'}
+        </button>
+      </form>
+    </Modal>
   );
 }

@@ -3,16 +3,27 @@ import { useParams } from 'react-router-dom';
 import { BroadcastViewer } from '../../core/broadcast-session';
 import type { Transport } from '../../core/connection-machine';
 import { ApiClient } from '../../api/rest';
+import { PageHead, TransportStatus } from '../components/ui';
+import { MuteIcon, VolumeIcon } from '../components/icons';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
+
+type WatchStatus = 'connecting' | 'connected' | 'ended' | 'error';
+
+const STATUS: Record<WatchStatus, { label: string; tone: string; detail: string }> = {
+  connecting: { label: 'Connecting', tone: '', detail: 'Joining the broadcast…' },
+  connected: { label: 'Live', tone: 'status-live', detail: '' },
+  ended: { label: 'Ended', tone: 'status-plain', detail: 'The broadcaster ended this stream.' },
+  error: { label: 'Offline', tone: 'status-bad', detail: 'Could not reach the stream. It may not be live yet.' },
+};
 
 export default function Watch() {
   const { code = '' } = useParams();
   const videoRef = useRef<HTMLVideoElement>(null);
   const pipRef = useRef<HTMLVideoElement>(null);
   const [transport, setTransport] = useState<Transport>('unknown');
-  const [status, setStatus] = useState<'connecting'|'connected'|'ended'|'error'>('connecting');
+  const [status, setStatus] = useState<WatchStatus>('connecting');
   const [showUnmute, setShowUnmute] = useState(false);
   const [hasCam, setHasCam] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -60,7 +71,8 @@ export default function Watch() {
     const el = videoRef.current;
     if (!el) return;
     el.muted = false;
-    el.volume = volume;
+    el.volume = volume || 1;
+    if (!volume) setVolume(1);
     setMuted(false);
     setShowUnmute(false);
   }
@@ -74,58 +86,53 @@ export default function Watch() {
     else { el.muted = false; setMuted(false); setShowUnmute(false); }
   }
 
-  const statusLabel = {
-    connecting: 'Connecting…',
-    connected: 'Live',
-    ended: 'Stream ended',
-    error: 'Could not connect',
-  }[status];
+  const info = STATUS[status];
+  const silent = muted || volume === 0;
 
   return (
-    <div className="page" style={{ maxWidth: 900 }}>
-      <div className="row-spread page-header">
-        <h2>Watching</h2>
-        <div className="row">
-          <span className={`chip${status === 'connected' ? ' chip-live' : ''}`}>
-            {status === 'connected' && <span className="live-dot" />}
-            {statusLabel}
-          </span>
-          {transport !== 'unknown' && <span className="chip">{transport}</span>}
+    <div className="page">
+      <PageHead title="Watching" back={{ to: '/channels', label: 'Channels' }}>
+        <div className="cluster">
+          <span className={`status ${info.tone}`}>{info.label}</span>
+          <TransportStatus transport={transport} />
         </div>
-      </div>
+      </PageHead>
 
-      <div className="video-wrap">
-        {status !== 'connected' && (
-          <div className="video-overlay">
-            <div style={{ textAlign: 'center', color: 'var(--text-2)' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>
-                {status === 'ended' ? '⏹' : status === 'error' ? '⚠️' : '⏳'}
-              </div>
-              <div>{statusLabel}</div>
+      <div className="stack">
+        <div className="stage">
+          {status !== 'connected' && (
+            <div className="stage-overlay">
+              {status === 'connecting' && <div className="spinner" aria-hidden="true" />}
+              <div className="stage-overlay-title">{status === 'connecting' ? 'Connecting' : info.label}</div>
+              <div className="small">{info.detail}</div>
+            </div>
+          )}
+          {showUnmute && muted && (
+            <div className="stage-overlay">
+              <button type="button" className="btn btn-primary btn-lg" onClick={unmute}>
+                <VolumeIcon /> Turn on sound
+              </button>
+            </div>
+          )}
+          <video ref={videoRef} playsInline controls aria-label="Live stream" />
+          {hasCam && <video ref={pipRef} className="stage-pip" playsInline muted aria-label="Broadcaster webcam" />}
+        </div>
+
+        {status === 'connected' && (
+          <div className="panel" style={{ paddingBlock: 'var(--sp-3)' }}>
+            <div className="volume">
+              <button type="button" className="btn btn-quiet btn-icon"
+                aria-label={silent ? 'Unmute' : 'Mute'}
+                onClick={() => (silent ? unmute() : changeVolume(0))}>
+                {silent ? <MuteIcon /> : <VolumeIcon />}
+              </button>
+              <input type="range" min="0" max="1" step="0.05" value={silent ? 0 : volume}
+                onChange={(e) => changeVolume(parseFloat(e.target.value))} aria-label="Volume" />
+              <span className="volume-value" aria-hidden="true">{Math.round((silent ? 0 : volume) * 100)}</span>
             </div>
           </div>
         )}
-        {showUnmute && muted && (
-          <div className="video-overlay">
-            <button className="btn btn-primary btn-lg" onClick={unmute}>
-              🔊 Click to unmute
-            </button>
-          </div>
-        )}
-        <video ref={videoRef} playsInline controls aria-label="Live stream" />
-        {hasCam && <video ref={pipRef} playsInline muted style={{ position: 'absolute', bottom: '1rem', right: '1rem', width: '30%', maxWidth: 180, borderRadius: 'var(--r)', border: '2px solid var(--border)', background: '#000', aspectRatio: '4/3', objectFit: 'cover' }} />}
       </div>
-
-      {status === 'connected' && (
-        <div className="card" style={{ marginTop: '1rem' }}>
-          <div className="card-title">Audio</div>
-          <div className="volume-row">
-            <span className="volume-icon">{muted || volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}</span>
-            <input type="range" min="0" max="1" step="0.05" value={volume}
-              onChange={(e) => changeVolume(parseFloat(e.target.value))} aria-label="Volume" />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

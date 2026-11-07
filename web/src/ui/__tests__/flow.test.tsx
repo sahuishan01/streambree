@@ -11,6 +11,7 @@ describe('app flow', () => {
   });
 
   it('sender screen lets you pick a source and mode', () => {
+    localStorage.setItem('sl_token', 'JWT');
     render(<MemoryRouter initialEntries={['/send']}><App /></MemoryRouter>);
     expect(screen.getByLabelText(/Screen/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Real-time/i)).toBeInTheDocument();
@@ -19,9 +20,16 @@ describe('app flow', () => {
   });
 
   it('channels screen shows a create form', () => {
+    localStorage.setItem('sl_token', 'JWT');
     render(<MemoryRouter initialEntries={['/channels']}><App /></MemoryRouter>);
     expect(screen.getByLabelText(/channel name/i)).toBeInTheDocument();
-    expect(screen.getByText(/Create/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create channel/i })).toBeInTheDocument();
+  });
+
+  it('join screen auto-fills the room code from a shared link', () => {
+    render(<MemoryRouter initialEntries={['/join?code=abcde12345']}><App /></MemoryRouter>);
+    expect(screen.getByRole('button', { name: /Leave/i })).toBeInTheDocument();
+    expect(screen.getByText('ABCDE12345')).toBeInTheDocument();
   });
 
   it('channel detail renders members and the go-live action for a member', async () => {

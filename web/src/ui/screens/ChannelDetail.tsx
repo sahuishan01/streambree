@@ -1,172 +1,209 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiClient, type Channel, type Member } from '../../api/rest';
-
-function StreamingTimer() {
-  const [elapsed, setElapsed] = useState('0:00');
-  useEffect(() => {
-    const t0 = Date.now();
-    const id = setInterval(() => {
-      const s = Math.floor((Date.now() - t0) / 1000);
-      setElapsed(`${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`);
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-  return <span className="timer">{elapsed}</span>;
-}
+import { useToast } from '../toast';
+import { SkeletonPage } from '../Skeleton';
+import { Notice, PageHead } from '../components/ui';
+import { CopyIcon } from '../components/icons';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ChannelDetail() {
   const { id = '' } = useParams();
   const nav = useNavigate();
   const api = new ApiClient(SERVER);
+  const { toast } = useToast();
   const [channel, setChannel] = useState<Channel | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [live, setLive] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [invite, setInvite] = useState('');
   const [addEmail, setAddEmail] = useState('');
-  const [addMsg, setAddMsg] = useState('');
+  const [addMsg, setAddMsg] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
 
   async function refresh() {
-    const [ch, mb, lv] = await Promise.all([
-      api.getChannel(id), api.listMembers(id), api.streamStatus(id),
-    ]);
-    setChannel(ch); setMembers(mb); setLive(lv);
+    try {
+      const [ch, mb, lv] = await Promise.all([
+        api.getChannel(id), api.listMembers(id), api.streamStatus(id),
+      ]);
+      setChannel(ch); setMembers(mb); setLive(lv);
+    } catch {
+      setLoadError(true);
+    }
   }
   useEffect(() => { void refresh(); }, [id]);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    pollRef.current = setInterval(async () => {
-      const lv = await api.streamStatus(id);
-      setLive(lv);
+    const poll = setInterval(() => {
+      api.streamStatus(id).then(setLive).catch(() => { /* keep last known state */ });
     }, 3000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => clearInterval(poll);
   }, [id]);
 
   const myRole = channel?.role ?? 'member';
   const canModerate = myRole === 'owner' || myRole === 'admin';
   const isOwner = myRole === 'owner';
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const emailValid = addEmail.length === 0 || emailRegex.test(addEmail);
+  const emailInvalid = addEmail.length > 0 && !EMAIL_RE.test(addEmail);
+  const inviteUrl = invite ? `${location.origin}/invite/${invite}` : '';
 
-  async function makeInvite() { setInvite(await api.createInvite(id)); }
-  async function remove() { if (!confirm(`Delete "${channel?.name}"?`)) return; await api.deleteChannel(id); nav('/channels'); }
-
-  async function addUser() {
-    setAddMsg('');
-    if (!addEmail) return;
-    const res = await api.addUser(id, addEmail);
-    if (res.ok) { setAddEmail(''); setAddMsg(`${addEmail} added.`); await refresh(); }
-    else if (res.status === 404) setAddMsg('No account with that email.');
-    else if (res.status === 409) setAddMsg('Already a member.');
-    else setAddMsg('Failed to add user.');
+  async function run(action: () => Promise<unknown>, failure: string) {
+    try { await action(); await refresh(); }
+    catch { toast('error', failure); }
   }
 
-  if (!channel) return (
-    <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '40vh' }}>
-      <div style={{ color: 'var(--text-2)' }}>Loading…</div>
+  async function makeInvite() {
+    try { setInvite(await api.createInvite(id)); }
+    catch { toast('error', 'Could not create an invite link.'); }
+  }
+
+  async function copyInvite() {
+    try { await navigator.clipboard.writeText(inviteUrl); toast('success', 'Invite link copied'); }
+    catch { toast('error', 'Could not copy. Select the link and copy it manually.'); }
+  }
+
+  async function removeChannel() {
+    if (!confirm(`Delete “${channel?.name}” for everyone? This cannot be undone.`)) return;
+    try { await api.deleteChannel(id); nav('/channels'); }
+    catch { toast('error', 'Could not delete the channel.'); }
+  }
+
+  function stopStream() {
+    if (!confirm('Stop the current broadcast for all viewers?')) return;
+    void run(() => api.stopStream(id), 'Could not stop the stream.');
+  }
+
+  function kick(m: Member) {
+    if (!confirm(`Remove ${m.email} from this channel?`)) return;
+    void run(() => api.removeMember(id, m.user_id), 'Could not remove the member.');
+  }
+
+  function makeOwner(m: Member) {
+    if (!confirm(`Make ${m.email} the owner? You will become an admin and lose owner rights.`)) return;
+    void run(() => api.transferOwner(id, m.user_id), 'Could not transfer ownership.');
+  }
+
+  async function addUser(e: React.FormEvent) {
+    e.preventDefault();
+    setAddMsg(null);
+    if (!addEmail || emailInvalid) return;
+    const res = await api.addUser(id, addEmail);
+    if (res.ok) { setAddMsg({ tone: 'success', text: `${addEmail} was added.` }); setAddEmail(''); await refresh(); }
+    else if (res.status === 404) setAddMsg({ tone: 'error', text: 'No account uses that email. Ask the server owner to create one.' });
+    else if (res.status === 409) setAddMsg({ tone: 'error', text: 'That person is already a member.' });
+    else setAddMsg({ tone: 'error', text: 'Could not add that person.' });
+  }
+
+  if (loadError && !channel) return (
+    <div className="page page-form">
+      <PageHead title="Channel unavailable" back={{ to: '/channels', label: 'Channels' }}
+        desc="It may have been deleted, or you are no longer a member." />
     </div>
   );
+  if (!channel) return <SkeletonPage className="page" />;
 
   return (
     <div className="page">
-      <div className="row-spread page-header">
-        <div>
-          <div className="row" style={{ marginBottom: '0.375rem' }}>
-            <Link to="/channels" style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>← Channels</Link>
-          </div>
-          <div className="row">
-            <h2>{channel.name}</h2>
-            {live && <span className="chip chip-live"><span className="live-dot" />Live</span>}
-            {live && (
-              <span className="chip">
-                <StreamingTimer />
-              </span>
-            )}
-          </div>
-          <div className="row" style={{ marginTop: '0.375rem' }}>
-            <span className={`badge badge-${myRole}`}>{myRole}</span>
-          </div>
+      <PageHead
+        back={{ to: '/channels', label: 'Channels' }}
+        title={channel.name}
+        actions={live ? (
+          <>
+            {canModerate && <button type="button" className="btn btn-danger" onClick={stopStream}>Stop stream</button>}
+            <Link to={`/watch/${channel.code}`} className="btn btn-live">Watch live</Link>
+          </>
+        ) : (
+          <Link to={`/golive/${channel.code}`} className="btn btn-primary">Go live</Link>
+        )}>
+        <div className="cluster">
+          {live ? <span className="status status-live">Live now</span> : <span className="status">Offline</span>}
+          <span className={`badge badge-${myRole}`}>you: {myRole}</span>
         </div>
-        <div className="row">
-          {live
-            ? <>
-                <Link to={`/watch/${channel.code}`} className="btn btn-live">Watch live</Link>
-                {canModerate && <button className="btn btn-danger btn-sm" onClick={() => api.stopStream(id).then(refresh)}>Stop</button>}
-              </>
-            : <Link to={`/golive/${channel.code}`} className="btn btn-primary">Go live</Link>}
-        </div>
-      </div>
+      </PageHead>
 
-      <div style={{ display: 'grid', gridTemplateColumns: canModerate ? '1fr 1fr' : '1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-        {canModerate && (
-          <div className="card">
-            <div className="card-title">Invite link</div>
-            <div className="row">
-              <button className="btn btn-ghost btn-sm" onClick={makeInvite}>Generate</button>
-            </div>
-            {invite && <div className="code-block" style={{ marginTop: '0.75rem' }}>{`${location.origin}/invite/${invite}`}</div>}
+      <div className={canModerate ? 'split' : ''}>
+        <section className="panel panel-flush" aria-labelledby="members-title">
+          <div className="panel-head">
+            <h2 className="panel-title" id="members-title">Members <span className="count">{members.length}</span></h2>
+            {isOwner && <button type="button" className="btn btn-danger btn-sm" onClick={removeChannel}>Delete channel</button>}
           </div>
-        )}
-        {canModerate && (
-          <div className="card">
-            <div className="card-title">Add member by email</div>
-            <div className="form-row">
-              <input className={`input${addEmail.length > 0 && !emailValid ? ' input-error' : ''}`}
-                value={addEmail} onChange={(e) => setAddEmail(e.target.value)}
-                placeholder="user@example.com" type="email"
-                onKeyDown={(e) => e.key === 'Enter' && emailValid && addUser()} />
-              <button className="btn btn-primary btn-sm" onClick={addUser} disabled={!emailValid}>Add</button>
-            </div>
-            {addEmail.length > 0 && !emailValid && <div className="field-hint error">Enter a valid email address</div>}
-            {addMsg && <div className={`alert ${addMsg.includes('added') ? 'alert-success' : 'alert-error'}`} style={{ marginTop: '0.625rem' }} role="alert">{addMsg}</div>}
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="row-spread" style={{ marginBottom: '1rem' }}>
-          <div className="card-title" style={{ margin: 0 }}>Members ({members.length})</div>
-          {isOwner && <button className="btn btn-danger btn-sm" onClick={remove}>Delete channel</button>}
-        </div>
-        <div className="member-list">
-          {members.map((m) => (
-            <div key={m.user_id} className="member-row">
-              <div className="member-avatar">{(m.email[0] ?? '?').toUpperCase()}</div>
-              <div className="member-info">
-                <div className="member-name">{m.email}</div>
-                <div className="member-sub">
-                  <span className={`badge badge-${m.role}`}>{m.role}</span>
-                  {!m.can_stream && <span className="badge badge-blocked" style={{ marginLeft: '0.375rem' }}>blocked</span>}
+          <ul className="list">
+            {members.map((m) => (
+              <li key={m.user_id} className="list-row">
+                <div className="avatar" aria-hidden="true">{(m.email[0] ?? '?').toUpperCase()}</div>
+                <div className="list-main">
+                  <span className="list-title truncate" style={{ fontSize: 'var(--fs-md)' }} title={m.email}>{m.email}</span>
+                  <span className="list-meta">
+                    <span className={`badge badge-${m.role}`}>{m.role}</span>
+                    {!m.can_stream && <span className="badge badge-blocked">can’t stream</span>}
+                  </span>
                 </div>
+                {canModerate && m.role !== 'owner' && (
+                  <div className="list-actions">
+                    <button type="button" className="btn btn-quiet btn-sm"
+                      onClick={() => run(() => api.setStreaming(id, m.user_id, !m.can_stream), 'Could not change streaming access.')}>
+                      {m.can_stream ? 'Block streaming' : 'Allow streaming'}
+                    </button>
+                    {isOwner && (
+                      <button type="button" className="btn btn-quiet btn-sm"
+                        onClick={() => run(() => api.changeRole(id, m.user_id, m.role === 'admin' ? 'member' : 'admin'), 'Could not change the role.')}>
+                        {m.role === 'admin' ? 'Make member' : 'Make admin'}
+                      </button>
+                    )}
+                    {isOwner && (
+                      <button type="button" className="btn btn-quiet btn-sm" onClick={() => makeOwner(m)}>Make owner</button>
+                    )}
+                    <button type="button" className="btn btn-danger btn-sm" onClick={() => kick(m)}>Remove</button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {canModerate && (
+          <aside className="split-aside" aria-label="Channel tools">
+            <section className="panel stack" aria-labelledby="invite-title">
+              <div className="panel-head-text">
+                <h2 className="panel-title" id="invite-title">Invite link</h2>
+                <p className="panel-desc">Anyone with an account who opens it can join.</p>
               </div>
-              {canModerate && m.role !== 'owner' && (
-                <div className="member-actions">
-                  <button className="btn btn-ghost btn-sm"
-                    onClick={() => api.setStreaming(id, m.user_id, !m.can_stream).then(refresh)}>
-                    {m.can_stream ? 'Block' : 'Unblock'}
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={() => api.removeMember(id, m.user_id).then(refresh)}>
-                    Kick
-                  </button>
-                  {isOwner && (
-                    <>
-                      <button className="btn btn-ghost btn-sm"
-                        onClick={() => api.changeRole(id, m.user_id, m.role === 'admin' ? 'member' : 'admin').then(refresh)}>
-                        {m.role === 'admin' ? 'Demote' : 'Promote'}
-                      </button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => api.transferOwner(id, m.user_id).then(refresh)}>
-                        Make owner
-                      </button>
-                    </>
-                  )}
+              {inviteUrl ? (
+                <div className="stack-sm">
+                  <label className="visually-hidden" htmlFor="invite-url">Invite link</label>
+                  <input id="invite-url" className="input input-sm mono" readOnly value={inviteUrl}
+                    onFocus={(e) => e.currentTarget.select()} />
+                  <div className="cluster">
+                    <button type="button" className="btn btn-primary btn-sm" onClick={copyInvite}><CopyIcon /> Copy link</button>
+                    <button type="button" className="btn btn-quiet btn-sm" onClick={makeInvite}>New link</button>
+                  </div>
                 </div>
+              ) : (
+                <div><button type="button" className="btn btn-secondary btn-sm" onClick={makeInvite}>Create invite link</button></div>
               )}
-            </div>
-          ))}
-        </div>
+            </section>
+
+            <form className="panel stack" onSubmit={addUser} aria-labelledby="add-title" noValidate>
+              <div className="panel-head-text">
+                <h2 className="panel-title" id="add-title">Add by email</h2>
+                <p className="panel-desc">For people who already have an account.</p>
+              </div>
+              <div className="field">
+                <label className="visually-hidden" htmlFor="add-email">Email address</label>
+                <div className="inline-form">
+                  <input id="add-email" className="input input-sm" type="email" value={addEmail}
+                    autoComplete="off" placeholder="name@example.com"
+                    aria-invalid={emailInvalid || undefined} aria-describedby={emailInvalid ? 'add-email-err' : undefined}
+                    onChange={(e) => { setAddEmail(e.target.value); setAddMsg(null); }} />
+                  <button type="submit" className="btn btn-primary btn-sm" style={{ minHeight: 34 }}
+                    disabled={!addEmail || emailInvalid}>Add</button>
+                </div>
+                {emailInvalid && <p id="add-email-err" className="hint hint-error">Enter a full email address.</p>}
+              </div>
+              {addMsg && <Notice tone={addMsg.tone}>{addMsg.text}</Notice>}
+            </form>
+          </aside>
+        )}
       </div>
     </div>
   );

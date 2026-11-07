@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiClient } from '../../api/rest';
-import { SkeletonLine, SkeletonBlock } from '../Skeleton';
+import { SkeletonPage } from '../Skeleton';
+import { Notice, PageHead } from '../components/ui';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
+const PW_MIN = 8;
+type Msg = { tone: 'success' | 'error'; text: string } | null;
 
 export default function Profile() {
   const nav = useNavigate();
@@ -13,12 +16,10 @@ export default function Profile() {
   const [username, setUsername] = useState('');
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [nameMsg, setNameMsg] = useState('');
-  const [nameMsgType, setNameMsgType] = useState<'success'|'error'>('success');
+  const [nameMsg, setNameMsg] = useState<Msg>(null);
   const [curPw, setCurPw] = useState('');
   const [newPw, setNewPw] = useState('');
-  const [pwMsg, setPwMsg] = useState('');
-  const [pwMsgType, setPwMsgType] = useState<'success'|'error'>('success');
+  const [pwMsg, setPwMsg] = useState<Msg>(null);
 
   useEffect(() => {
     if (!api.token) { nav('/auth'); return; }
@@ -34,90 +35,85 @@ export default function Profile() {
     setLoading(false);
   }
 
-  async function saveName() {
-    setNameMsg('');
+  async function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    setNameMsg(null);
     try {
       await api.updateMe(username);
-      setNameMsg('Username updated.'); setNameMsgType('success');
+      setNameMsg({ tone: 'success', text: 'Display name saved.' });
     } catch {
-      setNameMsg('Failed to update.'); setNameMsgType('error');
+      setNameMsg({ tone: 'error', text: 'Could not save the display name.' });
     }
   }
 
-  async function savePassword() {
-    setPwMsg('');
-    if (newPw.length < 8) { setPwMsg('New password must be at least 8 characters.'); setPwMsgType('error'); return; }
+  async function savePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwMsg(null);
+    if (newPw.length < PW_MIN) { setPwMsg({ tone: 'error', text: `New password needs at least ${PW_MIN} characters.` }); return; }
     try {
       await api.changePassword(curPw, newPw);
       setCurPw(''); setNewPw('');
-      setPwMsg('Password updated.'); setPwMsgType('success');
+      setPwMsg({ tone: 'success', text: 'Password changed.' });
     } catch {
-      setPwMsg('Incorrect current password.'); setPwMsgType('error');
+      setPwMsg({ tone: 'error', text: 'Your current password is incorrect.' });
     }
   }
 
-  if (loading) return (
-    <div className="page" style={{ maxWidth: 560 }}>
-      <div className="page-header">
-        <SkeletonLine width="30%" />
-        <SkeletonLine width="45%" />
-      </div>
-      <SkeletonBlock />
-      <div style={{ height: '1rem' }} />
-      <SkeletonBlock />
-    </div>
-  );
+  if (loading) return <SkeletonPage />;
 
   return (
-    <div className="page" style={{ maxWidth: 560 }}>
-      <div className="page-header">
-        <h2>Profile</h2>
-        <p className="page-subtitle">Manage your account settings</p>
-      </div>
+    <div className="page page-form">
+      <PageHead title="Profile" desc="Your account on this Streambree server." />
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <div className="row" style={{ marginBottom: '1.25rem' }}>
-          <div className="avatar avatar-lg">{(email[0] ?? '?').toUpperCase()}</div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '1.0625rem' }}>{username || email}</div>
-            <div style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>{email}</div>
-            <div style={{ marginTop: '0.375rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <span className={`badge ${isOwner ? 'badge-owner' : 'badge-member'}`}>
-                {isOwner ? 'Owner' : 'Member'}
-              </span>
-              {isOwner && <Link to="/users" className="btn btn-ghost btn-sm">Manage users</Link>}
+      <div className="stack">
+        <section className="panel" aria-label="Account">
+          <div className="spread">
+            <div className="cluster" style={{ gap: 'var(--sp-4)', minWidth: 0 }}>
+              <div className="avatar avatar-lg" aria-hidden="true">{(username[0] ?? email[0] ?? '?').toUpperCase()}</div>
+              <div className="stack-sm" style={{ gap: 'var(--sp-1)', minWidth: 0 }}>
+                <span className="list-title truncate" style={{ fontSize: 'var(--fs-lg)' }}>{username || email}</span>
+                <span className="muted small truncate">{email}</span>
+                <span><span className={`badge ${isOwner ? 'badge-owner' : ''}`}>{isOwner ? 'server owner' : 'member'}</span></span>
+              </div>
             </div>
+            {isOwner && <Link to="/users" className="btn btn-secondary btn-sm">Manage users</Link>}
           </div>
-        </div>
-        <div className="divider" />
-        <div className="card-title">Display name</div>
-        <div className="form-row">
-          <input className="input" value={username} onChange={(e) => setUsername(e.target.value)}
-            placeholder="Your display name" onKeyDown={(e) => e.key === 'Enter' && saveName()} />
-          <button className="btn btn-primary" onClick={saveName}>Save</button>
-        </div>
-        {nameMsg && <div className={`alert alert-${nameMsgType}`} style={{ marginTop: '0.625rem' }}>{nameMsg}</div>}
-      </div>
+        </section>
 
-      <div className="card">
-        <div className="card-title">Change password</div>
-        <div className="form">
+        <form className="panel stack" onSubmit={saveName} aria-labelledby="name-title">
+          <div className="panel-head-text">
+            <h2 className="panel-title" id="name-title">Display name</h2>
+            <p className="panel-desc">Shown to other members instead of your email.</p>
+          </div>
+          <div className="inline-form">
+            <label className="visually-hidden" htmlFor="display-name">Display name</label>
+            <input id="display-name" className="input" value={username} autoComplete="nickname" maxLength={60}
+              onChange={(e) => { setUsername(e.target.value); setNameMsg(null); }} placeholder="Your name" />
+            <button type="submit" className="btn btn-primary">Save</button>
+          </div>
+          {nameMsg && <Notice tone={nameMsg.tone}>{nameMsg.text}</Notice>}
+        </form>
+
+        <form className="panel stack" onSubmit={savePassword} aria-labelledby="pw-title">
+          <h2 className="panel-title" id="pw-title">Change password</h2>
           <div className="field">
-            <label className="field-label">Current password</label>
-            <input className="input" type="password" value={curPw}
-              onChange={(e) => setCurPw(e.target.value)} placeholder="••••••••" />
+            <label className="label" htmlFor="cur-pw">Current password</label>
+            <input id="cur-pw" className="input" type="password" value={curPw} autoComplete="current-password"
+              onChange={(e) => setCurPw(e.target.value)} />
           </div>
           <div className="field">
-            <label className="field-label">New password</label>
-            <input className="input" type="password" value={newPw}
-              onChange={(e) => setNewPw(e.target.value)} placeholder="Min 8 characters" />
+            <label className="label" htmlFor="new-pw">New password</label>
+            <input id="new-pw" className="input" type="password" value={newPw} autoComplete="new-password"
+              aria-describedby="new-pw-hint" onChange={(e) => setNewPw(e.target.value)} />
+            <p id="new-pw-hint" className="hint">At least {PW_MIN} characters.</p>
           </div>
-          {pwMsg && <div className={`alert alert-${pwMsgType}`}>{pwMsg}</div>}
-          <button className="btn btn-primary" onClick={savePassword}
-            disabled={!curPw || newPw.length < 8}>
-            Update password
-          </button>
-        </div>
+          {pwMsg && <Notice tone={pwMsg.tone}>{pwMsg.text}</Notice>}
+          <div>
+            <button type="submit" className="btn btn-primary" disabled={!curPw || newPw.length < PW_MIN}>
+              Change password
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

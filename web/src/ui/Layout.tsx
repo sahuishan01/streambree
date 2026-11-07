@@ -2,8 +2,19 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApiClient } from '../api/rest';
 import ForceResetModal from './screens/ForceResetModal';
+import { CloseIcon, LogoMark, MenuIcon } from './components/icons';
+import { ThemePicker } from './components/theme';
 
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
+
+interface NavItem { to: string; label: string; match: (path: string) => boolean; authOnly?: boolean }
+
+const NAV_ITEMS: NavItem[] = [
+  { to: '/join', label: 'Join', match: (p) => p === '/join' || p.startsWith('/watch') },
+  { to: '/send', label: 'Stream', match: (p) => p === '/send' || p.startsWith('/golive'), authOnly: true },
+  { to: '/channels', label: 'Channels', match: (p) => p.startsWith('/channels'), authOnly: true },
+  { to: '/shared-files', label: 'Files', match: (p) => p === '/shared-files' || p === '/shared' },
+];
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
@@ -13,26 +24,14 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [mustReset, setMustReset] = useState(false);
   const api = new ApiClient(SERVER);
 
-  useEffect(() => {
-    if (loggedIn) {
-      void checkMustReset();
-    } else {
-      setMustReset(false);
-    }
-  }, [loggedIn, pathname]);
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
 
-  async function checkMustReset() {
-    try {
-      const me = await api.me();
-      if (me?.must_change_password) {
-        setMustReset(true);
-      } else {
-        setMustReset(false);
-      }
-    } catch {
-      // ignore auth check error
-    }
-  }
+  useEffect(() => {
+    if (!loggedIn) { setMustReset(false); return; }
+    api.me()
+      .then((me) => setMustReset(Boolean(me?.must_change_password)))
+      .catch(() => { /* auth check is best-effort */ });
+  }, [loggedIn, pathname]);
 
   function logout() {
     localStorage.removeItem('sl_token');
@@ -40,65 +39,56 @@ export default function Layout({ children }: { children: ReactNode }) {
     nav('/auth');
   }
 
-  function closeMenu() { setMenuOpen(false); }
+  const items = NAV_ITEMS.filter((i) => loggedIn || !i.authOnly);
+  const accountActions = loggedIn ? (
+    <>
+      <Link to="/profile" className="btn btn-quiet btn-sm" aria-current={pathname === '/profile' ? 'page' : undefined}>
+        Profile
+      </Link>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={logout}>Sign out</button>
+    </>
+  ) : (
+    <Link to="/auth" className="btn btn-primary btn-sm">Sign in</Link>
+  );
 
   return (
     <div className="app">
-      <nav className="nav">
-        <div className="nav-inner">
-          <Link to="/" className="nav-brand" onClick={closeMenu}>
-            Streambree<span className="nav-brand-dot" />
+      <a href="#main" className="skip-link">Skip to content</a>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <Link to="/" className="brand" aria-label="Streambree home">
+            <LogoMark className="brand-mark" />
+            Streambree
           </Link>
-          <div className={`nav-links${menuOpen ? ' open' : ''}`}>
-            {loggedIn && (
-              <Link to="/channels" onClick={closeMenu}
-                className={`nav-link${pathname.startsWith('/channels') ? ' active' : ''}`}>
-                Channels
+
+          <nav id="primary-nav" className={`nav${menuOpen ? ' is-open' : ''}`} aria-label="Primary">
+            {items.map((item) => (
+              <Link key={item.to} to={item.to} className="nav-link"
+                aria-current={item.match(pathname) ? 'page' : undefined}>
+                {item.label}
               </Link>
-            )}
-            {loggedIn && (
-              <Link to="/send" onClick={closeMenu}
-                className={`nav-link${pathname === '/send' ? ' active' : ''}`}>
-                Send
-              </Link>
-            )}
-            {loggedIn && (
-              <Link to="/join" onClick={closeMenu}
-                className={`nav-link${pathname === '/join' ? ' active' : ''}`}>
-                Join
-              </Link>
-            )}
-            <Link to="/shared-files" onClick={closeMenu}
-              className={`nav-link${pathname === '/shared-files' ? ' active' : ''}`}>
-              Shared Files
-            </Link>
-          </div>
-          <button className="nav-hamburger" onClick={() => setMenuOpen((o) => !o)} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>
-            {menuOpen ? '✕' : '☰'}
-          </button>
-          <div className="nav-right">
-            {loggedIn ? (
-              <>
-                <Link to="/profile" className={`btn btn-ghost btn-sm${pathname === '/profile' ? ' active' : ''}`}>
-                  Profile
-                </Link>
-                <button className="btn btn-ghost btn-sm" onClick={logout}>Sign out</button>
-              </>
-            ) : (
-              <Link to="/auth" className="btn btn-primary btn-sm">Sign in</Link>
-            )}
+            ))}
+            <div className="nav-account">{menuOpen && accountActions}</div>
+          </nav>
+
+          <div className="topbar-end">
+            <ThemePicker />
+            <div className="topbar-actions">{accountActions}</div>
+            <button type="button" className="btn btn-quiet btn-icon menu-btn"
+              aria-expanded={menuOpen} aria-controls="primary-nav"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              onClick={() => setMenuOpen((o) => !o)}>
+              {menuOpen ? <CloseIcon width={20} height={20} /> : <MenuIcon width={20} height={20} />}
+            </button>
           </div>
         </div>
-      </nav>
-      {mustReset && (
-        <ForceResetModal
-          api={api}
-          onSuccess={() => {
-            setMustReset(false);
-          }}
-        />
-      )}
-      {children}
+      </header>
+
+      {mustReset && <ForceResetModal api={api} onSuccess={() => setMustReset(false)} />}
+
+      <main id="main" tabIndex={-1} style={{ outline: 'none', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </main>
     </div>
   );
 }

@@ -10,16 +10,19 @@ export function SkeletonBlock() {
   return <div className="skeleton skeleton-block" />;
 }
 
-export function SkeletonPage() {
+/** Placeholder for a page header plus content blocks while data loads. */
+export function SkeletonPage({ blocks = 2, className = 'page page-form' }: { blocks?: number; className?: string }) {
   return (
-    <div className="page" style={{ maxWidth: 680 }}>
-      <div className="page-header">
-        <SkeletonLine width="40%" />
-        <SkeletonLine width="25%" />
+    <div className={className} aria-busy="true" aria-label="Loading">
+      <div className="page-head">
+        <div style={{ width: '100%' }}>
+          <div className="skeleton skeleton-title" />
+          <SkeletonLine width="35%" />
+        </div>
       </div>
-      <SkeletonCard />
-      <div style={{ height: '1rem' }} />
-      <SkeletonCard />
+      <div className="stack">
+        {Array.from({ length: blocks }, (_, i) => <SkeletonBlock key={i} />)}
+      </div>
     </div>
   );
 }

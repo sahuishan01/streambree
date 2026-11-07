@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Streambree</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#0b0d10" />
+    <script>
+      // Apply the saved theme before first paint (logic mirrors src/ui/components/theme.tsx).
+      (function () {
+        var themes = ['breeze', 'midnight', 'ember', 'paper', 'sky', 'sand'];
+        var pref = 'system';
+        try { pref = localStorage.getItem('sl_theme') || 'system'; } catch (e) {}
+        if (themes.indexOf(pref) < 0) {
+          var light = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+          pref = light ? 'paper' : 'breeze';
+        }
+        document.documentElement.setAttribute('data-theme', pref);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

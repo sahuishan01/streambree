@@ -5,11 +5,16 @@ import { captureScreen, captureCamera, captureFile, isAudioFile, keepFileAlive, 
 import { BroadcastSender } from '../../core/broadcast-session';
 import { ApiClient } from '../../api/rest';
 import { useToast } from '../toast';
+import {
+  MEDIA_ACCEPT, ModePicker, Notice, PageHead, SourcePicker, StepSection, formatElapsed, useElapsed,
+  type SourceKind,
+} from '../components/ui';
 
-type SourceKind = 'screen' | 'camera' | 'file';
 const SERVER = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080';
 const WS = SERVER.replace(/^http/, 'ws') + '/ws/broadcast';
 const canShareScreen = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+
+function stopTracks(s?: MediaStream) { s?.getTracks().forEach((t) => t.stop()); }
 
 export default function GoLive() {
   const nav = useNavigate();
@@ -20,231 +25,195 @@ export default function GoLive() {
   const [file, setFile] = useState<File | null>(null);
   const [viewers, setViewers] = useState(0);
   const [live, setLive] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
   const [noAudio, setNoAudio] = useState(false);
-  const [elapsed, setElapsed] = useState('');
-  const [camOn, setCamOn] = useState(false);
   const [camStream, setCamStream] = useState<MediaStream | undefined>();
   const camPreviewRef = useRef<HTMLVideoElement>(null);
   const fileVideoRef = useRef<HTMLVideoElement>(null);
   const fileAudioRef = useRef<HTMLAudioElement>(null);
   const senderRef = useRef<BroadcastSender | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<MediaStream | undefined>();
+  const camRef = useRef<MediaStream | undefined>();
   const keepAliveRef = useRef<(() => void) | null>(null);
   const api = new ApiClient(SERVER);
   const { toast } = useToast();
+  const elapsed = useElapsed(live);
+
+  camRef.current = camStream;
+  // Leaving the page ends the broadcast and releases capture devices.
+  useEffect(() => () => {
+    senderRef.current?.close();
+    stopTracks(streamRef.current);
+    stopTracks(camRef.current);
+    releaseWakeLock();
+    keepAliveRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    if (camStream && camPreviewRef.current) {
+      camPreviewRef.current.srcObject = camStream;
+      camPreviewRef.current.play().catch(() => {});
+    }
+  }, [camStream, live]);
 
   const audioOnly = file ? isAudioFile(file) : false;
+  const needsFile = source === 'file' && !file;
+  const showFilePlayer = live && source === 'file' && !!file;
 
   async function capture(): Promise<MediaStream> {
     if (source === 'camera') return captureCamera();
     if (source === 'file') {
       if (!file) throw new Error('Choose a file first.');
-      if (audioOnly) {
-        if (!fileAudioRef.current) throw new Error('No audio element.');
-        return captureFile(file, fileAudioRef.current);
-      }
-      if (!fileVideoRef.current) throw new Error('No video element.');
-      return captureFile(file, fileVideoRef.current);
+      const el = audioOnly ? fileAudioRef.current : fileVideoRef.current;
+      if (!el) throw new Error('The file player is not ready yet. Try again.');
+      return captureFile(file, el);
     }
     return captureScreen();
   }
 
   async function toggleCam() {
     if (camStream) {
-      camStream.getTracks().forEach((t) => t.stop());
+      stopTracks(camStream);
       setCamStream(undefined);
-      setCamOn(false);
       return;
     }
     try {
-      const s = await captureCamera(true);
-      setCamStream(s);
-      setCamOn(true);
-      if (camPreviewRef.current) {
-        camPreviewRef.current.srcObject = s;
-        camPreviewRef.current.play().catch(() => {});
-      }
+      setCamStream(await captureCamera(true));
     } catch {
-      toast('error', 'Could not access camera');
+      toast('error', 'Could not access the camera. Check browser permissions.');
     }
   }
 
   async function start() {
+    setError('');
+    setStarting(true);
     try {
       let stream = await capture();
       if (camStream) stream = mergeStreams(stream, camStream);
+      streamRef.current = stream;
       const hasAudio = stream.getAudioTracks().length > 0;
       setNoAudio(!hasAudio);
-      if (!hasAudio && source === 'screen') {
-        toast('warning', 'No audio — viewers will hear silence. Share a browser tab with audio enabled.');
-      }
       const ice = await api.turnCredentials();
       const sender = new BroadcastSender(WS, api.token ?? '', code, mode, stream, ice);
       sender.onViewerCount(setViewers);
-      sender.onStopped(() => { setLive(false); setError('Stream was stopped remotely.'); });
+      sender.onStopped(() => { stop(); setError('The stream was stopped by a channel moderator.'); });
       sender.start();
       senderRef.current = sender;
-      setLive(true); setError('');
+      setLive(true);
       void requestWakeLock();
       if (source === 'file') {
         const el = audioOnly ? fileAudioRef.current : fileVideoRef.current;
         if (el) keepAliveRef.current = keepFileAlive(el);
       }
-      const t0 = Date.now();
-      timerRef.current = setInterval(() => {
-        const s = Math.floor((Date.now() - t0) / 1000);
-        setElapsed(`${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`);
-      }, 1000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const cancelled = e instanceof DOMException && e.name === 'NotAllowedError';
+      setError(cancelled ? 'Capture was cancelled or blocked by the browser.'
+        : e instanceof Error ? e.message : String(e));
+    } finally {
+      setStarting(false);
     }
   }
 
   function stop() {
-    senderRef.current?.close(); setLive(false); setViewers(0);
-    if (timerRef.current) clearInterval(timerRef.current);
-    setElapsed('');
+    senderRef.current?.close();
+    senderRef.current = null;
+    setLive(false);
+    setViewers(0);
     releaseWakeLock();
     keepAliveRef.current?.();
     keepAliveRef.current = null;
-    camStream?.getTracks().forEach((t) => t.stop());
+    stopTracks(streamRef.current);
+    streamRef.current = undefined;
+    stopTracks(camRef.current);
     setCamStream(undefined);
-    setCamOn(false);
+    fileVideoRef.current?.pause();
+    fileAudioRef.current?.pause();
   }
 
   return (
-    <div className="page" style={{ maxWidth: 680 }}>
-      <div className="page-header">
-        <h2>Go live</h2>
-        <p className="page-subtitle">Broadcast to your channel viewers</p>
-      </div>
+    <div className="page page-form">
+      <PageHead
+        back={{ to: '/channels', label: 'Channels' }}
+        title={live ? 'You are live' : 'Go live'}
+        desc={live ? 'Everyone in the channel can watch now.' : 'Broadcast to everyone in this channel.'}
+      />
 
       {!live ? (
-        <div className="form">
-          <div className="card">
-            <div className="card-title">Source</div>
-            <div className="radio-group">
-              {(['screen','camera','file'] as SourceKind[])
-                .filter((s) => s !== 'screen' || canShareScreen)
-                .map((s) => (
-                  <label key={s} className={`radio-opt${source === s ? ' checked' : ''}`}>
-                    <input type="radio" name="src" checked={source === s} onChange={() => setSource(s)} />
-                    {s === 'screen' ? '🖥 Screen' : s === 'camera' ? '📷 Camera' : '📁 File'}
-                  </label>
-                ))}
-            </div>
+        <div className="stack-lg">
+          <StepSection n={1} title="Choose what to share">
+            <SourcePicker source={source} onChange={setSource} canShareScreen={canShareScreen} />
             {source === 'screen' && (
-              <div className="alert alert-info" style={{ marginTop: '0.75rem' }}>
-                Check "Share audio" or "Share tab audio" in the browser prompt to include sound.
-              </div>
+              <p className="hint">To include sound, tick “Share audio” in the browser’s picker.</p>
             )}
             {source === 'file' && (
-              <div style={{ marginTop: '0.75rem' }}>
-                <input className="input" type="file"
-                  accept="video/*,audio/*,.mkv,.mp4,.webm,.avi,.mov,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac,.aiff"
+              <div className="field">
+                <label className="label" htmlFor="live-file">Media file</label>
+                <input id="live-file" className="input input-file" type="file" accept={MEDIA_ACCEPT}
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-                {file && (
-                  <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-2)' }}>
-                    {audioOnly ? '🎵' : '🎬'} {file.name}
-                  </div>
-                )}
               </div>
             )}
+            {(source === 'screen' || source === 'file') && (
+              <label className="check">
+                <input type="checkbox" checked={!!camStream} onChange={toggleCam} />
+                Add webcam overlay (picture-in-picture)
+              </label>
+            )}
+            {camStream && <video ref={camPreviewRef} className="cam-preview" playsInline muted aria-label="Webcam preview" />}
+          </StepSection>
+
+          <StepSection n={2} title="Pick a quality mode">
+            <ModePicker mode={mode} onChange={setMode} />
+          </StepSection>
+
+          {error && <Notice tone="error">{error}</Notice>}
+
+          <div className="stack-sm">
+            <button type="button" className="btn btn-live btn-lg btn-block" onClick={start} disabled={starting || needsFile}>
+              {starting ? 'Starting…' : 'Go live'}
+            </button>
+            {needsFile && <p className="hint" style={{ textAlign: 'center' }}>Choose a file to continue.</p>}
           </div>
-
-          {(source === 'screen' || source === 'file') && (
-            <div className="card">
-              <div className="card-title">Camera overlay</div>
-              <label className="radio-opt" style={{ display: 'inline-flex' }}>
-                <input type="checkbox" checked={camOn} onChange={toggleCam} style={{ marginRight: '0.375rem' }} />
-                📷 Show camera picture-in-picture
-              </label>
-              {camOn && camPreviewRef && (
-                <video ref={camPreviewRef} playsInline muted
-                  style={{ width: '100%', maxWidth: 200, borderRadius: 'var(--r)', marginTop: '0.75rem', aspectRatio: '4/3', objectFit: 'cover', background: '#000' }} />
-              )}
-            </div>
-          )}
-
-          <div className="card">
-            <div className="card-title">Quality mode</div>
-            <div className="radio-group">
-              <label className={`radio-opt${mode === 'realtime' ? ' checked' : ''}`}>
-                <input type="radio" name="mode" checked={mode === 'realtime'} onChange={() => setMode('realtime')} />
-                ⚡ Real-time
-              </label>
-              <label className={`radio-opt${mode === 'quality' ? ' checked' : ''}`}>
-                <input type="radio" name="mode" checked={mode === 'quality'} onChange={() => setMode('quality')} />
-                🎬 High quality
-              </label>
-            </div>
-          </div>
-
-          {error && <div className="alert alert-error">{error}</div>}
-          <button className="btn btn-primary btn-lg" onClick={start}>Go live</button>
         </div>
       ) : (
-        <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-          <div className="chip chip-live" style={{ display: 'inline-flex', marginBottom: '1.25rem' }}>
-            <span className="live-dot" />Broadcasting
-          </div>
-          <div className="stat-bar" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
-            <div className="stat">
-              <div className="stat-val">{viewers}</div>
-              <div className="stat-lbl">{viewers === 1 ? 'Viewer' : 'Viewers'}</div>
-            </div>
-            {elapsed && (
+        <div className="stack">
+          <section className="panel stack" aria-label="Broadcast status" style={{ alignItems: 'center', paddingBlock: 'var(--sp-6)' }}>
+            <span className="status status-live">Broadcasting</span>
+            <div className="stats">
               <div className="stat">
-                <div className="stat-val timer">{elapsed}</div>
-                <div className="stat-lbl">Elapsed</div>
+                <div className="stat-value" aria-live="polite">{viewers}</div>
+                <div className="stat-label">{viewers === 1 ? 'viewer' : 'viewers'}</div>
               </div>
-            )}
-          </div>
-          {viewers === 0 && (
-            <p style={{ textAlign: 'center', color: 'var(--text-2)', fontSize: '0.875rem', marginBottom: '1rem' }}>
-              Waiting for viewers to join…
-            </p>
-          )}
-          {noAudio && (
-            <div className="alert alert-warning" style={{ marginBottom: '1rem', textAlign: 'left' }} role="alert">
-              No audio track — viewers hear no sound. For screen share, enable "Share audio" and restart.
-              For files, check the codec (AC3/DTS unsupported; convert to AAC).
+              <div className="stat">
+                <div className="stat-value">{formatElapsed(elapsed)}</div>
+                <div className="stat-label">elapsed</div>
+              </div>
             </div>
+            {viewers === 0 && <p className="muted small">Waiting for viewers to join…</p>}
+          </section>
+          {noAudio && (
+            <Notice tone="warn">
+              No audio track, so viewers hear nothing. For screen sharing, stop and restart with
+              “Share audio” ticked. For files, AC3/DTS audio is not supported; convert it to AAC.
+            </Notice>
           )}
-          <button className="btn btn-danger" onClick={stop}>Stop stream</button>
+          {camStream && <video ref={camPreviewRef} className="cam-preview" playsInline muted aria-label="Webcam preview" />}
         </div>
       )}
 
-      {/*
-        Audio-only file: <audio> element with native controls.
-        Kept mounted so captureStream() pipeline stays alive while live.
-        Hidden when not in use.
-      */}
-      <audio
-        ref={fileAudioRef}
-        controls={live && source === 'file' && audioOnly}
-        style={
-          source === 'file' && audioOnly
-            ? { display: 'block', width: '100%', marginTop: '1rem' }
-            : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
-        }
-      />
+      {/* File players stay mounted so captureStream() keeps running; parked off-screen when unused. */}
+      <div className="stack" style={{ marginTop: showFilePlayer ? 'var(--sp-5)' : 0 }}>
+        <audio ref={fileAudioRef} controls={showFilePlayer && audioOnly}
+          className={showFilePlayer && audioOnly ? 'file-player-audio' : 'offscreen-media'} />
+        <video ref={fileVideoRef} playsInline controls={showFilePlayer && !audioOnly}
+          className={showFilePlayer && !audioOnly ? 'file-player' : 'offscreen-media'} />
+      </div>
 
-      {/*
-        Video file: <video> element.
-        1px off-screen when not in use so Chrome keeps the audio pipeline alive.
-      */}
-      <video
-        ref={fileVideoRef}
-        playsInline
-        controls={live && source === 'file' && !audioOnly}
-        style={
-          source === 'file' && !audioOnly
-            ? { display: 'block', width: '100%', marginTop: '1rem', borderRadius: 'var(--r-lg)' }
-            : { position: 'fixed', left: '-9999px', width: '1px', height: '1px' }
-        }
-      />
+      {live && (
+        <div style={{ marginTop: 'var(--sp-6)' }}>
+          <button type="button" className="btn btn-danger btn-block" onClick={stop}>End broadcast</button>
+        </div>
+      )}
     </div>
   );
 }
