@@ -12,6 +12,7 @@ import Watch from './screens/Watch';
 import InviteAccept from './screens/InviteAccept';
 import Users from './screens/Users';
 import Profile from './screens/Profile';
+import SharedFiles from './screens/SharedFiles';
 
 function Page({ children }: { children: React.ReactNode }) {
   return <div className="page-enter">{children}</div>;
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/invite/:code"   element={<Page><InviteAccept /></Page>} />
           <Route path="/users"          element={<Page><Users /></Page>} />
           <Route path="/profile"        element={<Page><Profile /></Page>} />
+          <Route path="/shared-files"   element={<Page><SharedFiles /></Page>} />
         </Routes>
       </Layout>
     </ToastProvider>

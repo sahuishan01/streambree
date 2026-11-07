@@ -1,6 +1,7 @@
 //! HTTP API: auth, devices, channels, TURN credentials.
 
 pub mod channels;
+pub mod files;
 pub mod handlers;
 pub mod invites;
 pub mod policy;
@@ -57,6 +58,8 @@ pub fn router(state: AppState) -> Router {
         .route("/ws/broadcast", get(ws_broadcast::ws_broadcast))
         .route("/channels/:id/stream", get(channels::stream_status))
         .route("/channels/:id/stream/stop", post(channels::stop_stream))
+        .route("/shared-files", get(files::list_files).post(files::upload_file).delete(files::delete_item))
+        .route("/shared-files/mkdir", post(files::create_folder))
         .with_state(state)
 }
 
